@@ -228,6 +228,7 @@ void main() {
     late AttendanceController controller;
 
     setUp(() {
+      TestWidgetsFlutterBinding.ensureInitialized();
       mockRepo = MockAttendanceRepository();
       controller = AttendanceController(repository: mockRepo);
     });
@@ -272,7 +273,7 @@ void main() {
     test('Manager rejectAttendance requires non-empty reason', () async {
       final success = await controller.rejectAttendance('att_200', '   ');
       expect(success, isFalse);
-      expect(controller.errorMessage, equals('Rejection reason is required.'));
+      expect(controller.errorMessage, equals('Please provide a valid rejection reason.'));
     });
   });
 }

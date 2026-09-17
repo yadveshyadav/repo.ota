@@ -40,8 +40,10 @@ class AttendanceController extends ChangeNotifier {
   List<Machine> _assignedMachines = [];
   List<UserModel> _teamMembers = [];
 
-  // In-memory cache for today's marked team/machine attendance records
+  // In-memory cache for today's marked team attendance records
   final Map<String, AttendanceModel> _markedTeamAttendanceMap = {};
+  // In-memory cache for today's marked machine attendance records
+  final Map<String, AttendanceModel> _markedMachineAttendanceMap = {};
 
   // Location Capture State
   AttendanceLocation? _capturedLocation;
@@ -133,23 +135,26 @@ class AttendanceController extends ChangeNotifier {
     final dt = record.checkInTime ?? record.createdAt;
     if (!isSameDay(dt)) return;
 
-    if (record.userId.trim().isNotEmpty) {
-      _markedTeamAttendanceMap[record.userId.trim().toLowerCase()] = record;
-    }
-    if (record.markedForUserId != null && record.markedForUserId!.trim().isNotEmpty) {
-      _markedTeamAttendanceMap[record.markedForUserId!.trim().toLowerCase()] = record;
-    }
-    if (record.employeeId != null && record.employeeId!.trim().isNotEmpty) {
-      _markedTeamAttendanceMap[record.employeeId!.trim().toLowerCase()] = record;
-    }
-    if (record.userName.trim().isNotEmpty) {
-      _markedTeamAttendanceMap[record.userName.trim().toLowerCase()] = record;
-    }
-    if (record.machineChassisNo != null && record.machineChassisNo!.trim().isNotEmpty) {
-      _markedTeamAttendanceMap[record.machineChassisNo!.trim().toLowerCase()] = record;
-    }
-    if (record.machineId != null && record.machineId!.trim().isNotEmpty) {
-      _markedTeamAttendanceMap[record.machineId!.trim().toLowerCase()] = record;
+    if (record.isMachineAttendance) {
+      if (record.machineChassisNo != null && record.machineChassisNo!.trim().isNotEmpty) {
+        _markedMachineAttendanceMap[record.machineChassisNo!.trim().toLowerCase()] = record;
+      }
+      if (record.machineId != null && record.machineId!.trim().isNotEmpty) {
+        _markedMachineAttendanceMap[record.machineId!.trim().toLowerCase()] = record;
+      }
+    } else {
+      if (record.userId.trim().isNotEmpty) {
+        _markedTeamAttendanceMap[record.userId.trim().toLowerCase()] = record;
+      }
+      if (record.markedForUserId != null && record.markedForUserId!.trim().isNotEmpty) {
+        _markedTeamAttendanceMap[record.markedForUserId!.trim().toLowerCase()] = record;
+      }
+      if (record.employeeId != null && record.employeeId!.trim().isNotEmpty) {
+        _markedTeamAttendanceMap[record.employeeId!.trim().toLowerCase()] = record;
+      }
+      if (record.userName.trim().isNotEmpty) {
+        _markedTeamAttendanceMap[record.userName.trim().toLowerCase()] = record;
+      }
     }
 
     _history.removeWhere((item) => item.id == record.id);
@@ -196,8 +201,8 @@ class AttendanceController extends ChangeNotifier {
       if (isSameDay(rec.checkInTime ?? rec.createdAt)) return rec;
     }
 
-    // 2. Check todayAttendance
-    if (_todayAttendance != null) {
+    // 2. Check todayAttendance (ensure it is personal/team attendance)
+    if (_todayAttendance != null && !_todayAttendance!.isMachineAttendance) {
       final t = _todayAttendance!;
       final matchesUser = (t.userId.toLowerCase().trim() == idClean) ||
           (t.markedForUserId != null && t.markedForUserId!.toLowerCase().trim() == idClean) ||
@@ -211,8 +216,9 @@ class AttendanceController extends ChangeNotifier {
       }
     }
 
-    // 3. Check history records
+    // 3. Check history records (ensure non-machine attendance)
     for (final record in _history) {
+      if (record.isMachineAttendance) continue;
       final matchesUser = (record.userId.toLowerCase().trim() == idClean) ||
           (record.markedForUserId != null && record.markedForUserId!.toLowerCase().trim() == idClean) ||
           (empClean.isNotEmpty && record.employeeId != null && record.employeeId!.toLowerCase().trim() == empClean) ||
@@ -240,12 +246,12 @@ class AttendanceController extends ChangeNotifier {
 
     final chassisLower = chassisNo.toLowerCase().trim();
 
-    if (chassisLower.isNotEmpty && _markedTeamAttendanceMap.containsKey(chassisLower)) {
-      final rec = _markedTeamAttendanceMap[chassisLower]!;
+    if (chassisLower.isNotEmpty && _markedMachineAttendanceMap.containsKey(chassisLower)) {
+      final rec = _markedMachineAttendanceMap[chassisLower]!;
       if (isSameDay(rec.checkInTime ?? rec.createdAt)) return rec;
     }
 
-    if (_todayAttendance != null) {
+    if (_todayAttendance != null && _todayAttendance!.isMachineAttendance) {
       final t = _todayAttendance!;
       final matchesMachine = (t.machineChassisNo != null && t.machineChassisNo!.toLowerCase().trim() == chassisLower) ||
           (t.machineId != null && t.machineId!.toLowerCase().trim() == chassisLower);
@@ -257,6 +263,7 @@ class AttendanceController extends ChangeNotifier {
     }
 
     for (final record in _history) {
+      if (!record.isMachineAttendance) continue;
       final matchesMachine = (record.machineChassisNo != null && record.machineChassisNo!.toLowerCase().trim() == chassisLower) ||
           (record.machineId != null && record.machineId!.toLowerCase().trim() == chassisLower);
       final recordDate = record.checkInTime ?? record.createdAt;
@@ -542,7 +549,9 @@ class AttendanceController extends ChangeNotifier {
       _registerTeamAttendanceRecord(record);
       await AttendanceStorageService().saveRecord(record);
 
-      _todayAttendance = record;
+      if (_todayAttendance == null || _todayAttendance!.isMachineAttendance) {
+        _todayAttendance = record;
+      }
       _isSubmitting = false;
       notifyListeners();
 

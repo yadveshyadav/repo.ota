@@ -35,9 +35,7 @@ abstract class AppConstants {
   // Base URLs & API Endpoints
   //static const String defaultBaseUrl = 'https://27qxnvkh-3000.inc1.devtunnels.ms';
   static const String defaultBaseUrl = 'https://hero.pramaanu.co.in';
-  // static const String defaultBaseUrl = 'http://127.0.0.1:8000';
   static const String machinesEndpoint = '/api/v1/machines/';
-  static const String machinesFallbackEndpoint =
-      'https://hero.pramaanu.co.in/api/v1/machines/';
+  static const String machinesFallbackEndpoint = 'https://hero.pramaanu.co.in/api/v1/machines/';
   static const String vendorsEndpoint = '/api/v1/integrations/vendors/';
 }
