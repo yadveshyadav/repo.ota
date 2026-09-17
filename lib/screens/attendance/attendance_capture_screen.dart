@@ -131,17 +131,13 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
 
   Future<void> _handleSubmitAttendanceDirectly() async {
     final c = widget.controller;
+    // Submit only requires a captured photo. Team face ML already ran at selfie time.
     final hasPhoto = c.capturedPhotoBytes != null && c.capturedPhotoBytes!.isNotEmpty;
-    final faceOk = !_requiresFace || c.isFaceVerified;
 
-    if (!hasPhoto || !faceOk) {
+    if (!hasPhoto) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _requiresFace
-                ? 'Please capture a verified face selfie before submitting.'
-                : 'Please capture an attendance photo before submitting.',
-          ),
+        const SnackBar(
+          content: Text('Please capture an attendance photo before submitting.'),
           backgroundColor: AppColors.criticalRed,
         ),
       );
@@ -163,6 +159,7 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
     });
 
     // Burn lat/lng + phone into the photo before upload (proof on server).
+    // Must not clear face-verified / photo state — stamp only replaces image bytes.
     await c.stampCapturedPhotoProof(phoneNumber: _proofPhoneNumber);
     if (!mounted) return;
 
@@ -200,8 +197,7 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
         messenger.showSnackBar(
           SnackBar(
             content: Text(
-              c.faceRejectionMessage ??
-                  c.errorMessage ??
+              c.errorMessage ??
                   'Attendance submission failed. Please try again.',
             ),
             backgroundColor: AppColors.criticalRed,

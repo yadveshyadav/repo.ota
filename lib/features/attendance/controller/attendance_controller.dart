@@ -448,6 +448,7 @@ class AttendanceController extends ChangeNotifier {
   }
 
   /// Burns lat/lng + phone onto the captured photo for on-screen proof and upload.
+  /// Keeps face-verified state; only the image bytes are replaced with the stamped copy.
   Future<bool> stampCapturedPhotoProof({required String phoneNumber}) async {
     if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
       return false;
@@ -469,6 +470,7 @@ class AttendanceController extends ChangeNotifier {
       );
       _capturedPhotoBytes = stamped;
       // Prefer memory preview of stamped bytes over original file path.
+      // Do NOT clear _faceVerified — verification already happened at capture.
       _capturedPhotoPath = null;
       notifyListeners();
       return true;
@@ -480,26 +482,11 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
-  /// Gate for team submit: photo must already have passed face verify at capture.
-  /// Does not re-run ML Kit — verification happens only when the selfie is taken.
-  Future<bool> ensureFaceVerifiedForSubmit() async {
-    if (_capturedPhotoPath == null ||
-        _capturedPhotoBytes == null ||
-        _capturedPhotoBytes!.isEmpty ||
-        !_faceVerified) {
-      _faceRejectionMessage =
-          'A clear face selfie is required for team attendance.';
-      _errorMessage = null;
-      _faceVerified = false;
-      notifyListeners();
-      return false;
-    }
-    return true;
-  }
-
+  /// Submit gate: only require that a photo was captured (team face ML runs at selfie only).
   Future<bool> _ensurePhotoCapturedForSubmit() async {
     if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
       _errorMessage = 'Please capture an attendance photo before submitting.';
+      _faceRejectionMessage = null;
       notifyListeners();
       return false;
     }
@@ -586,7 +573,7 @@ class AttendanceController extends ChangeNotifier {
       return false;
     }
 
-    if (!await ensureFaceVerifiedForSubmit()) {
+    if (!await _ensurePhotoCapturedForSubmit()) {
       return false;
     }
 
