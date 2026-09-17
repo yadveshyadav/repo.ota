@@ -3,6 +3,8 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:image/image.dart' as img;
+import 'package:path_provider/path_provider.dart';
 
 /// Result of attendance selfie face validation.
 class FaceValidationResult {
@@ -30,16 +32,23 @@ class FaceValidationResult {
 }
 
 /// Validates that an attendance selfie contains one clear, forward-facing face.
+///
+/// On iOS, camera JPEGs often store portrait orientation only in EXIF. ML Kit
+/// does not apply that tag when loading from a file path, so faces appear
+/// sideways and detection returns empty. We bake EXIF into pixel data first.
 class AttendanceFaceDetectionService {
   FaceDetector? _detector;
 
   /// Max absolute head rotation (degrees) allowed for a usable selfie.
-  static const double maxHeadYawDegrees = 25;
-  static const double maxHeadPitchDegrees = 25;
-  static const double maxHeadRollDegrees = 25;
+  static const double maxHeadYawDegrees = 35;
+  static const double maxHeadPitchDegrees = 35;
+  static const double maxHeadRollDegrees = 35;
 
-  /// Face must cover at least this fraction of the shorter image side.
-  static const double minFaceSizeRatio = 0.18;
+  /// Face must cover at least this fraction of the shorter image side (post-check).
+  static const double minFaceSizeRatio = 0.12;
+
+  /// ML Kit early filter — keep loose; we enforce size ourselves after detection.
+  static const double mlKitMinFaceSize = 0.1;
 
   FaceDetector get _faceDetector {
     return _detector ??= FaceDetector(
@@ -48,8 +57,7 @@ class AttendanceFaceDetectionService {
         enableLandmarks: true,
         enableContours: false,
         performanceMode: FaceDetectorMode.accurate,
-        // Ignore tiny / distant faces early in the ML pipeline.
-        minFaceSize: minFaceSizeRatio,
+        minFaceSize: mlKitMinFaceSize,
       ),
     );
   }
@@ -69,9 +77,27 @@ class AttendanceFaceDetectionService {
       );
     }
 
+    File? normalizedFile;
     try {
-      final inputImage = InputImage.fromFilePath(imagePath);
-      final faces = await _faceDetector.processImage(inputImage);
+      // Critical for iOS: bake EXIF orientation into pixels before ML Kit.
+      normalizedFile = await _normalizeImageForMlKit(imagePath);
+      final processPath = normalizedFile?.path ?? imagePath;
+
+      var faces = await _faceDetector.processImage(
+        InputImage.fromFilePath(processPath),
+      );
+
+      // If still empty (rare EXIF / crop edge cases), try rotated copies.
+      if (faces.isEmpty) {
+        faces = await _detectWithRotationFallbacks(processPath);
+      }
+
+      if (kDebugMode) {
+        print(
+          '[AttendanceFaceDetectionService] faces=${faces.length} '
+          'path=$processPath platform=${Platform.operatingSystem}',
+        );
+      }
 
       if (faces.isEmpty) {
         return FaceValidationResult.invalid(
@@ -102,7 +128,7 @@ class AttendanceFaceDetectionService {
         return FaceValidationResult.invalid(landmarkError, faceCount: 1);
       }
 
-      final sizeError = await _validateFaceSize(imagePath, face.boundingBox);
+      final sizeError = await _validateFaceSize(processPath, face.boundingBox);
       if (sizeError != null) {
         return FaceValidationResult.invalid(sizeError, faceCount: 1);
       }
@@ -124,7 +150,83 @@ class AttendanceFaceDetectionService {
       return FaceValidationResult.invalid(
         'Unable to verify your face. Please retake a clear selfie with good lighting.',
       );
+    } finally {
+      try {
+        await normalizedFile?.delete();
+      } catch (_) {}
     }
+  }
+
+  /// Decodes the capture, applies EXIF orientation, writes upright JPEG for ML Kit.
+  Future<File?> _normalizeImageForMlKit(String imagePath) async {
+    try {
+      final bytes = await File(imagePath).readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) return null;
+
+      final oriented = img.bakeOrientation(decoded);
+
+      // Cap long side so face detection stays fast on high-res iPhone photos.
+      img.Image ready = oriented;
+      const maxSide = 1280;
+      if (ready.width > maxSide || ready.height > maxSide) {
+        ready = ready.width >= ready.height
+            ? img.copyResize(ready, width: maxSide)
+            : img.copyResize(ready, height: maxSide);
+      }
+
+      final dir = await getTemporaryDirectory();
+      final out = File(
+        '${dir.path}/face_norm_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
+      await out.writeAsBytes(img.encodeJpg(ready, quality: 92));
+      return out;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceFaceDetectionService] normalize failed: $e');
+      }
+      return null;
+    }
+  }
+
+  /// When EXIF bake still leaves an empty result, try 90° rotations.
+  Future<List<Face>> _detectWithRotationFallbacks(String imagePath) async {
+    try {
+      final bytes = await File(imagePath).readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) return const [];
+
+      for (final angle in [90, 180, 270]) {
+        final rotated = img.copyRotate(decoded, angle: angle);
+        final dir = await getTemporaryDirectory();
+        final out = File(
+          '${dir.path}/face_rot_${angle}_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
+        await out.writeAsBytes(img.encodeJpg(rotated, quality: 90));
+        try {
+          final faces = await _faceDetector.processImage(
+            InputImage.fromFilePath(out.path),
+          );
+          if (faces.isNotEmpty) {
+            if (kDebugMode) {
+              print(
+                '[AttendanceFaceDetectionService] faces found after $angle° rotate',
+              );
+            }
+            return faces;
+          }
+        } finally {
+          try {
+            await out.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceFaceDetectionService] rotation fallback failed: $e');
+      }
+    }
+    return const [];
   }
 
   String? _validateHeadPose(Face face) {
@@ -147,10 +249,10 @@ class AttendanceFaceDetectionService {
   String? _validateEyesOpen(Face face) {
     final left = face.leftEyeOpenProbability;
     final right = face.rightEyeOpenProbability;
+    // Classification can be unavailable on some iOS paths — skip if null.
     if (left == null || right == null) return null;
 
-    // Both eyes clearly closed → likely not a live selfie check.
-    if (left < 0.2 && right < 0.2) {
+    if (left < 0.15 && right < 0.15) {
       return 'Please keep your eyes open and look at the camera.';
     }
     return null;
@@ -161,7 +263,8 @@ class AttendanceFaceDetectionService {
     final hasLeftEye = face.landmarks[FaceLandmarkType.leftEye] != null;
     final hasRightEye = face.landmarks[FaceLandmarkType.rightEye] != null;
 
-    if (!hasNose && !(hasLeftEye && hasRightEye)) {
+    // Require at least one reliable landmark set; don't fail if iOS omits some.
+    if (!hasNose && !(hasLeftEye || hasRightEye)) {
       return 'Face is not clear enough. Move closer, improve lighting, and retake.';
     }
     return null;
@@ -189,7 +292,6 @@ class AttendanceFaceDetectionService {
       }
       return null;
     } catch (_) {
-      // If size decode fails, rely on ML Kit minFaceSize + other checks.
       return null;
     }
   }

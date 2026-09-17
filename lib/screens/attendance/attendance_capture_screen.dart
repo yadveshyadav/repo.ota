@@ -104,16 +104,29 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
     // Face rejection is shown inline — no snackbar needed.
   }
 
+  /// Approximate site label for known demo pins only.
+  ///
+  /// IMPORTANT: this is NOT reverse-geocoding. A previous 0.5° (~55 km) radius
+  /// wrongly labeled all of Delhi–Gurgaon NCR as "Connaught Place".
   String _getAddressFromCoordinates(double lat, double lng) {
-    if ((lat - 26.619).abs() < 0.5 && (lng - 74.403).abs() < 0.5) {
-      return 'Sujangarh Site, Churu District, Rajasthan 331507';
-    } else if ((lat - 28.613).abs() < 0.5 && (lng - 77.209).abs() < 0.5) {
-      return 'Connaught Place, New Delhi, Delhi 110001';
-    } else if ((lat - 26.912).abs() < 0.5 && (lng - 75.787).abs() < 0.5) {
-      return 'MI Road, Jaipur, Rajasthan 302001';
-    } else {
-      return 'Site Work Area (${lat.toStringAsFixed(4)}°N, ${lng.toStringAsFixed(4)}°E)';
+    // ~0.008° ≈ 800–900 m — only label when truly near a known pin.
+    const matchRadiusDeg = 0.008;
+
+    const knownSites = <({double lat, double lng, String name})>[
+      (lat: 26.619, lng: 74.403, name: 'Sujangarh Site, Churu District, Rajasthan 331507'),
+      (lat: 28.6315, lng: 77.2167, name: 'Connaught Place, New Delhi, Delhi 110001'),
+      (lat: 26.912, lng: 75.787, name: 'MI Road, Jaipur, Rajasthan 302001'),
+    ];
+
+    for (final site in knownSites) {
+      if ((lat - site.lat).abs() < matchRadiusDeg &&
+          (lng - site.lng).abs() < matchRadiusDeg) {
+        return site.name;
+      }
     }
+
+    // Honest fallback: show the real GPS point (attendance submit uses these coords).
+    return 'GPS fix ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}';
   }
 
   Future<void> _handleSubmitAttendanceDirectly() async {
@@ -652,7 +665,7 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text('AUTOMATIC ADDRESS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryGreen)),
+                                    const Text('LOCATION', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryGreen)),
                                     const SizedBox(height: 2),
                                     Text(
                                       _getAddressFromCoordinates(location.latitude, location.longitude),

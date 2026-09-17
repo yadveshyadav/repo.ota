@@ -57,9 +57,10 @@ class AttendanceCameraService {
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
-        imageQuality: 85,
-        maxWidth: 1024,
-        maxHeight: 1024,
+        imageQuality: 90,
+        // Keep enough resolution for ML Kit (needs ~100x100 face pixels).
+        maxWidth: 1600,
+        maxHeight: 1600,
       );
       return photo;
     } catch (e) {
