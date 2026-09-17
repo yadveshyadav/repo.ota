@@ -86,6 +86,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       Navigator.of(context).pushReplacementNamed(AppRoutes.expenses);
     } else if (route == 'Stock & Spares' || route == 'Stock' || route == 'Inventory') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.inventory);
+    } else if (route == 'Breakdown' || route == 'Breakdowns') {
+      Navigator.of(context).pushNamed(AppRoutes.breakdowns);
     } else if (route == 'Alert Center' || route == 'Alerts' || route == 'Alert') {
       Navigator.of(context).pushNamed(AppRoutes.alerts);
     } else if (route == 'Notifications') {

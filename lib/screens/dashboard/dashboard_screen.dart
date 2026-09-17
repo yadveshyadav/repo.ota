@@ -173,6 +173,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Navigator.of(context).pushNamed(AppRoutes.roles);
     } else if (route == 'Attendance') {
       Navigator.of(context).pushNamed(AppRoutes.attendance);
+    } else if (route == 'Breakdown' || route == 'Breakdowns') {
+      Navigator.of(context).pushNamed(AppRoutes.breakdowns);
     } else if (route == 'Expenses') {
       Navigator.of(context).pushNamed(AppRoutes.expenses);
     } else if (route == 'Stock & Spares' || route == 'Stock' || route == 'Inventory') {

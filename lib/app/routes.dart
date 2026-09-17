@@ -11,6 +11,7 @@ import 'package:hero_app/features/vendors/screens/vendors_screen.dart';
 import 'package:hero_app/models/task_model.dart';
 import 'package:hero_app/screens/alerts/alerts_screen.dart';
 import 'package:hero_app/screens/attendance/attendance_screen.dart';
+import 'package:hero_app/screens/breakdown/breakdown_machines_screen.dart';
 import 'package:hero_app/screens/common/forbidden_screen.dart';
 import 'package:hero_app/screens/dashboard/dashboard_screen.dart';
 import 'package:hero_app/screens/machines/machine_detail_screen.dart';
@@ -98,6 +99,10 @@ abstract class AppRoutes {
             )(context),
         notifications: (context) => const NotificationScreen(),
         alerts: (context) => const AlertsScreen(),
+        breakdowns: (context) => _guardRoute(
+              permission: 'breakdowns.view',
+              builder: (ctx) => const BreakdownMachinesScreen(),
+            )(context),
         refuel: (context) => _guardRoute(
               permission: 'refuel.view',
               builder: (ctx) => const RefuelHistoryScreen(),
@@ -212,6 +217,12 @@ abstract class AppRoutes {
       case alerts:
         return MaterialPageRoute(
           builder: (_) => const AlertsScreen(),
+          settings: settings,
+        );
+      case breakdowns:
+        return _buildGuardedPageRoute(
+          permission: 'breakdowns.view',
+          builder: (_) => const BreakdownMachinesScreen(),
           settings: settings,
         );
       case refuel:

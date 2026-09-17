@@ -444,38 +444,38 @@ class _AttendanceDetailScreenState extends State<AttendanceDetailScreen> {
             ),
             const SizedBox(height: 24),
 
-            // Manager Action Buttons
-            if (isManager && isPending)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: widget.controller.isSubmitting ? null : _handleReject,
-                      icon: const Icon(Icons.cancel_outlined, size: 18, color: AppColors.criticalRed),
-                      label: const Text('✕ Reject Attendance', style: TextStyle(color: AppColors.criticalRed, fontWeight: FontWeight.bold)),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: const BorderSide(color: AppColors.criticalRed),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: widget.controller.isSubmitting ? null : _handleApprove,
-                      icon: const Icon(Icons.check_circle_outline, size: 18),
-                      label: const Text('✓ Approve Attendance', style: TextStyle(fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryGreen,
-                        foregroundColor: AppColors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            // Manager Action Buttons — temporarily disabled
+            // if (isManager && isPending)
+            //   Row(
+            //     children: [
+            //       Expanded(
+            //         child: OutlinedButton.icon(
+            //           onPressed: widget.controller.isSubmitting ? null : _handleReject,
+            //           icon: const Icon(Icons.cancel_outlined, size: 18, color: AppColors.criticalRed),
+            //           label: const Text('✕ Reject Attendance', style: TextStyle(color: AppColors.criticalRed, fontWeight: FontWeight.bold)),
+            //           style: OutlinedButton.styleFrom(
+            //             padding: const EdgeInsets.symmetric(vertical: 14),
+            //             side: const BorderSide(color: AppColors.criticalRed),
+            //             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            //           ),
+            //         ),
+            //       ),
+            //       const SizedBox(width: 12),
+            //       Expanded(
+            //         child: ElevatedButton.icon(
+            //           onPressed: widget.controller.isSubmitting ? null : _handleApprove,
+            //           icon: const Icon(Icons.check_circle_outline, size: 18),
+            //           label: const Text('✓ Approve Attendance', style: TextStyle(fontWeight: FontWeight.bold)),
+            //           style: ElevatedButton.styleFrom(
+            //             backgroundColor: AppColors.primaryGreen,
+            //             foregroundColor: AppColors.white,
+            //             padding: const EdgeInsets.symmetric(vertical: 14),
+            //             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            //           ),
+            //         ),
+            //       ),
+            //     ],
+            //   ),
           ],
         ),
       ),

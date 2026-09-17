@@ -8,6 +8,7 @@ class LocationResult {
   final double accuracy;
   final String source; // 'GPS' or 'TEST_LOCATION'
   final bool isMocked;
+  final DateTime? capturedAt;
 
   const LocationResult({
     required this.latitude,
@@ -15,6 +16,7 @@ class LocationResult {
     required this.accuracy,
     required this.source,
     this.isMocked = false,
+    this.capturedAt,
   });
 
   bool get isTestLocation => source == 'TEST_LOCATION';
@@ -29,12 +31,54 @@ abstract class LocationService {
   Future<LocationPermission> checkPermission();
   Future<LocationPermission> requestPermission();
   Future<LocationResult> getCurrentLocation({bool useTestLocation = false});
+  Future<LocationResult> getAccurateLocationForAttendance({bool useTestLocation = false});
+  Future<void> warmUpAccurateLocation({bool silent = true});
 }
 
 /// Production / Development Location Service Implementation
 class AppLocationService implements LocationService {
+  AppLocationService._();
+  static final AppLocationService instance = AppLocationService._();
+  factory AppLocationService() => instance;
+
   static const double testLatitude = 28.6139;
   static const double testLongitude = 77.2090;
+
+  /// Re-use a recent high-accuracy fix for attendance (set by warm-up or prior capture).
+  static const Duration accurateCacheMaxAge = Duration(minutes: 3);
+  static const double attendanceTargetAccuracyMeters = 50.0;
+
+  LocationResult? _cachedAccurate;
+  DateTime? _cachedAt;
+  Future<void>? _warmUpInFlight;
+
+  LocationResult? get cachedAccurateLocation => _cachedAccurate;
+  DateTime? get cachedAccurateAt => _cachedAt;
+
+  void _storeCache(LocationResult result) {
+    if (result.isTestLocation) return;
+    _cachedAccurate = result;
+    _cachedAt = result.capturedAt ?? DateTime.now();
+  }
+
+  bool _isCacheFresh({double maxAccuracyMeters = attendanceTargetAccuracyMeters}) {
+    final cached = _cachedAccurate;
+    final at = _cachedAt;
+    if (cached == null || at == null) return false;
+    if (DateTime.now().difference(at) > accurateCacheMaxAge) return false;
+    return cached.accuracy <= maxAccuracyMeters;
+  }
+
+  LocationResult _fromPosition(Position position) {
+    return LocationResult(
+      latitude: position.latitude,
+      longitude: position.longitude,
+      accuracy: position.accuracy,
+      source: 'GPS',
+      isMocked: position.isMocked,
+      capturedAt: position.timestamp,
+    );
+  }
 
   @override
   Future<bool> isLocationServiceEnabled() async {
@@ -63,97 +107,154 @@ class AppLocationService implements LocationService {
     }
   }
 
+  Future<LocationPermission> _ensurePermission({required bool requestIfDenied}) async {
+    var permission = await checkPermission();
+    if (permission == LocationPermission.denied && requestIfDenied) {
+      permission = await requestPermission();
+    }
+    return permission;
+  }
+
+  /// Background warm-up when app opens / resumes (no UI). Only runs if permission already granted.
   @override
-  Future<LocationResult> getCurrentLocation({bool useTestLocation = false}) async {
-    if (useTestLocation) {
-      if (kDebugMode) {
-        print('[LocationService] Using TEST LOCATION: $testLatitude, $testLongitude');
+  Future<void> warmUpAccurateLocation({bool silent = true}) async {
+    if (_warmUpInFlight != null) {
+      return _warmUpInFlight;
+    }
+
+    _warmUpInFlight = _warmUpAccurateLocationInternal(silent: silent);
+    try {
+      await _warmUpInFlight;
+    } finally {
+      _warmUpInFlight = null;
+    }
+  }
+
+  Future<void> _warmUpAccurateLocationInternal({required bool silent}) async {
+    try {
+      if (!await isLocationServiceEnabled()) return;
+
+      final permission = await checkPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
       }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+
+      _storeCache(_fromPosition(position));
+      if (kDebugMode) {
+        print(
+          '[LocationService] Warm-up GPS: ${position.latitude}, ${position.longitude} '
+          '±${position.accuracy.toStringAsFixed(1)}m',
+        );
+      }
+    } catch (e) {
+      if (!silent && kDebugMode) {
+        print('[LocationService] Warm-up skipped/failed: $e');
+      }
+    }
+  }
+
+  /// High-accuracy path for team / machine attendance (uses warm-up cache when fresh).
+  @override
+  Future<LocationResult> getAccurateLocationForAttendance({
+    bool useTestLocation = false,
+  }) async {
+    if (useTestLocation) {
       return const LocationResult(
         latitude: testLatitude,
         longitude: testLongitude,
         accuracy: 5.0,
         source: 'TEST_LOCATION',
         isMocked: true,
+        capturedAt: null,
       );
     }
 
     final serviceEnabled = await isLocationServiceEnabled();
     if (!serviceEnabled) {
-      throw Exception('Location services (GPS) are disabled on your device. Please enable GPS or select Test Location mode.');
+      throw Exception(
+        'Location services (GPS) are disabled on your device. Please enable GPS.',
+      );
     }
 
-    var permission = await checkPermission();
+    var permission = await _ensurePermission(requestIfDenied: true);
     if (permission == LocationPermission.denied) {
-      permission = await requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw Exception('Location permission is required. Please grant location permission or select Test Location mode.');
-      }
+      throw Exception(
+        'Location permission is required. Please grant location permission.',
+      );
     }
-
     if (permission == LocationPermission.deniedForever) {
-      throw Exception('Location permission is permanently denied in settings. Please enable location permission in settings or select Test Location mode.');
+      throw Exception(
+        'Location permission is permanently denied. Enable it in device settings.',
+      );
     }
 
-    // 1. Fast last-known position check to prevent Android main thread ANR
-    try {
-      final lastPos = await Geolocator.getLastKnownPosition();
-      if (lastPos != null) {
-        if (kDebugMode) {
-          print('[LocationService] Fast last known position: ${lastPos.latitude}, ${lastPos.longitude}');
-        }
-        return LocationResult(
-          latitude: lastPos.latitude,
-          longitude: lastPos.longitude,
-          accuracy: lastPos.accuracy,
-          source: 'GPS',
-          isMocked: lastPos.isMocked,
-        );
+    if (_isCacheFresh()) {
+      if (kDebugMode) {
+        print('[LocationService] Using cached accurate GPS for attendance');
       }
-    } catch (_) {}
+      return _cachedAccurate!;
+    }
 
-    // 2. High-speed current position with 5-second timeout safeguard
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      final result = _fromPosition(position);
+      _storeCache(result);
+      return result;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[LocationService] High-accuracy fix failed: $e');
+      }
+    }
+
     try {
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.medium,
-          timeLimit: Duration(seconds: 5),
+          timeLimit: Duration(seconds: 8),
         ),
       );
-
-      return LocationResult(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        accuracy: position.accuracy,
-        source: 'GPS',
-        isMocked: position.isMocked,
-      );
+      final result = _fromPosition(position);
+      _storeCache(result);
+      return result;
     } catch (e) {
       if (kDebugMode) {
-        print('[LocationService] GPS Position timeout/error: $e, falling back to site GPS');
+        print('[LocationService] Medium-accuracy fallback failed: $e');
       }
-      // 3. Secondary last-known position fallback
-      try {
-        final lastPos = await Geolocator.getLastKnownPosition();
-        if (lastPos != null) {
-          return LocationResult(
-            latitude: lastPos.latitude,
-            longitude: lastPos.longitude,
-            accuracy: lastPos.accuracy,
-            source: 'GPS',
-            isMocked: lastPos.isMocked,
-          );
-        }
-      } catch (_) {}
-
-      // Default site GPS fallback
-      return const LocationResult(
-        latitude: testLatitude,
-        longitude: testLongitude,
-        accuracy: 5.0,
-        source: 'GPS',
-        isMocked: false,
-      );
     }
+
+    try {
+      final lastPos = await Geolocator.getLastKnownPosition();
+      if (lastPos != null) {
+        final age = DateTime.now().difference(lastPos.timestamp);
+        if (age.inMinutes <= 5) {
+          final result = _fromPosition(lastPos);
+          _storeCache(result);
+          return result;
+        }
+      }
+    } catch (_) {}
+
+    throw Exception(
+      'Unable to obtain an accurate GPS fix. Please wait a moment and try again outdoors with clear sky view.',
+    );
+  }
+
+  /// Legacy fast path (may use stale last-known). Prefer [getAccurateLocationForAttendance] for attendance.
+  @override
+  Future<LocationResult> getCurrentLocation({bool useTestLocation = false}) async {
+    return getAccurateLocationForAttendance(useTestLocation: useTestLocation);
   }
 }

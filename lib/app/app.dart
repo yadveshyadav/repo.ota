@@ -3,6 +3,7 @@ import '../core/constants/app_constants.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/app_globals.dart';
 import '../features/auth/services/auth_storage_service.dart';
+import '../services/location_service.dart';
 import 'routes.dart';
 
 /// Root Application Widget for HERO APP with Lifecycle Activity Observation
@@ -18,6 +19,14 @@ class _HeroAppState extends State<HeroApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _warmUpLocationIfLoggedIn();
+    });
+  }
+
+  void _warmUpLocationIfLoggedIn() {
+    if (!AuthStorageService().isLoggedIn) return;
+    AppLocationService.instance.warmUpAccurateLocation(silent: true);
   }
 
   @override
@@ -32,6 +41,7 @@ class _HeroAppState extends State<HeroApp> with WidgetsBindingObserver {
       AuthStorageService().init().then((_) {
         if (AuthStorageService().isLoggedIn) {
           AuthStorageService().touchLastActive();
+          AppLocationService.instance.warmUpAccurateLocation(silent: true);
         }
       });
     }

@@ -711,33 +711,35 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
           if (isPending)
             Row(
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: widget.controller.isSubmitting ? null : () => _handleReject(item),
-                    icon: const Icon(Icons.cancel_outlined, size: 16, color: AppColors.criticalRed),
-                    label: const Text('Reject', style: TextStyle(color: AppColors.criticalRed, fontWeight: FontWeight.bold, fontSize: 13)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.criticalRed),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: widget.controller.isSubmitting ? null : () => _handleApprove(item),
-                    icon: const Icon(Icons.check_circle_outline, size: 16),
-                    label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryGreen,
-                      foregroundColor: AppColors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
+                // Reject / Approve temporarily disabled
+                // Expanded(
+                //   child: OutlinedButton.icon(
+                //     onPressed: widget.controller.isSubmitting ? null : () => _handleReject(item),
+                //     icon: const Icon(Icons.cancel_outlined, size: 16, color: AppColors.criticalRed),
+                //     label: const Text('Reject', style: TextStyle(color: AppColors.criticalRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                //     style: OutlinedButton.styleFrom(
+                //       side: const BorderSide(color: AppColors.criticalRed),
+                //       padding: const EdgeInsets.symmetric(vertical: 10),
+                //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                //     ),
+                //   ),
+                // ),
+                // const SizedBox(width: 10),
+                // Expanded(
+                //   child: ElevatedButton.icon(
+                //     onPressed: widget.controller.isSubmitting ? null : () => _handleApprove(item),
+                //     icon: const Icon(Icons.check_circle_outline, size: 16),
+                //     label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                //     style: ElevatedButton.styleFrom(
+                //       backgroundColor: AppColors.primaryGreen,
+                //       foregroundColor: AppColors.white,
+                //       padding: const EdgeInsets.symmetric(vertical: 10),
+                //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                //     ),
+                //   ),
+                // ),
+                // const SizedBox(width: 10),
+                const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.visibility_outlined, size: 20, color: AppColors.primaryGreen),
                   onPressed: () {

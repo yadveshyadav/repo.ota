@@ -8,6 +8,7 @@ import '../../auth/models/user_model.dart';
 import '../../auth/services/auth_storage_service.dart';
 import '../../../repositories/attendance_repository.dart';
 import '../../../services/attendance_storage_service.dart';
+import '../../../services/attendance_photo_stamp_service.dart';
 import '../../../services/camera_service.dart';
 import '../../../services/face_detection_service.dart';
 import '../../../services/location_service.dart';
@@ -19,6 +20,7 @@ class AttendanceController extends ChangeNotifier {
   final LocationService locationService;
   final AttendanceCameraService cameraService;
   final AttendanceFaceDetectionService faceDetectionService;
+  final AttendancePhotoStampService photoStampService;
 
   static const double maxLocationAccuracyMeters = 50.0;
 
@@ -60,11 +62,14 @@ class AttendanceController extends ChangeNotifier {
     LocationService? locationService,
     AttendanceCameraService? cameraService,
     AttendanceFaceDetectionService? faceDetectionService,
+    AttendancePhotoStampService? photoStampService,
   })  : repository = repository ?? ApiAttendanceRepository(),
         locationService = locationService ?? AppLocationService(),
         cameraService = cameraService ?? AttendanceCameraService(),
         faceDetectionService =
-            faceDetectionService ?? AttendanceFaceDetectionService();
+            faceDetectionService ?? AttendanceFaceDetectionService(),
+        photoStampService =
+            photoStampService ?? AttendancePhotoStampService();
 
   @override
   void notifyListeners() {
@@ -341,7 +346,7 @@ class AttendanceController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final locResult = await locationService.getCurrentLocation(
+      final locResult = await locationService.getAccurateLocationForAttendance(
         useTestLocation: _useTestLocation,
       );
 
@@ -438,6 +443,39 @@ class AttendanceController extends ChangeNotifier {
       _faceRejectionMessage = null;
       _errorMessage = e.toString().replaceAll('Exception: ', '');
       notifyListeners();
+      return false;
+    }
+  }
+
+  /// Burns lat/lng + phone onto the captured photo for on-screen proof and upload.
+  Future<bool> stampCapturedPhotoProof({required String phoneNumber}) async {
+    if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
+      return false;
+    }
+
+    if (_capturedLocation == null) {
+      await captureFreshLocation();
+    }
+    if (_capturedLocation == null) {
+      return false;
+    }
+
+    try {
+      final stamped = await photoStampService.stampProof(
+        imageBytes: _capturedPhotoBytes!,
+        latitude: _capturedLocation!.latitude,
+        longitude: _capturedLocation!.longitude,
+        phoneNumber: phoneNumber,
+      );
+      _capturedPhotoBytes = stamped;
+      // Prefer memory preview of stamped bytes over original file path.
+      _capturedPhotoPath = null;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceController] Photo stamp error: $e');
+      }
       return false;
     }
   }

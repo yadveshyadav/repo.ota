@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 import 'package:hero_app/features/attendance/controller/attendance_controller.dart';
 import 'package:hero_app/features/auth/models/user_model.dart';
+import 'package:hero_app/features/auth/services/auth_storage_service.dart';
 import 'package:hero_app/models/machine.dart';
 import 'package:hero_app/screens/attendance/attendance_success_screen.dart';
 import '../../shared/widgets/safe_image_widget.dart';
@@ -33,6 +34,16 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
   /// Face detection applies only to team attendance (not machine).
   bool get _requiresFace => widget.targetTeamMember != null;
 
+  String get _proofPhoneNumber {
+    final teamPhone = widget.targetTeamMember?.phoneNumber?.trim();
+    if (teamPhone != null && teamPhone.isNotEmpty) return teamPhone;
+
+    final selfPhone = AuthStorageService().currentUser?.phoneNumber?.trim();
+    if (selfPhone != null && selfPhone.isNotEmpty) return selfPhone;
+
+    return 'N/A';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -63,9 +74,13 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
       requireFace: _requiresFace,
     );
     if (!mounted) return;
+
     if (success) {
+      setState(() => _isLocating = true);
       await widget.controller.captureFreshLocation();
       if (!mounted) return;
+      setState(() => _isLocating = false);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -134,6 +149,10 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
       _isSubmittingDirectly = true;
     });
 
+    // Burn lat/lng + phone into the photo before upload (proof on server).
+    await c.stampCapturedPhotoProof(phoneNumber: _proofPhoneNumber);
+    if (!mounted) return;
+
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
@@ -184,11 +203,6 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
     final actionLabel = widget.isCheckOut ? 'Check Out' : 'Check In';
     final controller = widget.controller;
 
-    final location = controller.capturedLocation;
-    final photoBytes = controller.capturedPhotoBytes;
-    final photoPath = controller.capturedPhotoPath;
-    final errorMessage = controller.errorMessage;
-
     String titleText = 'Mark Attendance ($actionLabel)';
     if (widget.selectedMachine != null) {
       titleText = 'Machine Attendance (${widget.selectedMachine!.model})';
@@ -199,6 +213,13 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, child) {
+        // IMPORTANT: read controller state inside the builder so photo updates
+        // after capture (reading outside keeps a stale null preview).
+        final location = controller.capturedLocation;
+        final photoBytes = controller.capturedPhotoBytes;
+        final photoPath = controller.capturedPhotoPath;
+        final errorMessage = controller.errorMessage;
+
         return Scaffold(
           backgroundColor: AppColors.backgroundGray,
           appBar: AppBar(
@@ -454,12 +475,30 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: AppImageWidget(
-                              photoPath: photoPath,
-                              photoBytes: photoBytes,
-                              width: double.infinity,
-                              height: 220,
-                              fit: BoxFit.cover,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                AppImageWidget(
+                                  key: ValueKey(
+                                    'capture_${photoBytes.length}_${photoBytes.hashCode}',
+                                  ),
+                                  photoPath: photoPath,
+                                  photoBytes: photoBytes,
+                                  width: double.infinity,
+                                  height: 220,
+                                  fit: BoxFit.cover,
+                                ),
+                                // Visible proof badge (lat/lng + phone) before submit.
+                                Positioned(
+                                  right: 8,
+                                  bottom: 8,
+                                  child: _buildPhotoProofBadge(
+                                    latitude: location?.latitude,
+                                    longitude: location?.longitude,
+                                    phone: _proofPhoneNumber,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
@@ -699,6 +738,61 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPhotoProofBadge({
+    required double? latitude,
+    required double? longitude,
+    required String phone,
+  }) {
+    final latLng = (latitude != null && longitude != null)
+        ? '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}'
+        : 'GPS pending…';
+
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 210),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xCC0B1F17),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            latLng,
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            phone,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.92),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              height: 1.2,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
