@@ -480,11 +480,13 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
-  /// Re-run face checks before team attendance submit.
+  /// Gate for team submit: photo must already have passed face verify at capture.
+  /// Does not re-run ML Kit — verification happens only when the selfie is taken.
   Future<bool> ensureFaceVerifiedForSubmit() async {
     if (_capturedPhotoPath == null ||
         _capturedPhotoBytes == null ||
-        _capturedPhotoBytes!.isEmpty) {
+        _capturedPhotoBytes!.isEmpty ||
+        !_faceVerified) {
       _faceRejectionMessage =
           'A clear face selfie is required for team attendance.';
       _errorMessage = null;
@@ -492,32 +494,6 @@ class AttendanceController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-
-    _isVerifyingFace = true;
-    _errorMessage = null;
-    _faceRejectionMessage = null;
-    notifyListeners();
-
-    final validation =
-        await faceDetectionService.validateAttendanceSelfie(_capturedPhotoPath!);
-
-    _isVerifyingFace = false;
-
-    if (!validation.isValid) {
-      _faceVerified = false;
-      _capturedPhoto = null;
-      _capturedPhotoPath = null;
-      _capturedPhotoBytes = null;
-      _faceRejectionMessage = validation.message ??
-          'No face detected. Please look at the camera and retake a clear selfie.';
-      _errorMessage = null;
-      notifyListeners();
-      return false;
-    }
-
-    _faceVerified = true;
-    _faceRejectionMessage = null;
-    notifyListeners();
     return true;
   }
 
