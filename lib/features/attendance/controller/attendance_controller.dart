@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../models/attendance_location.dart';
 import '../../../models/attendance_model.dart';
@@ -8,23 +9,28 @@ import '../../auth/services/auth_storage_service.dart';
 import '../../../repositories/attendance_repository.dart';
 import '../../../services/attendance_storage_service.dart';
 import '../../../services/camera_service.dart';
+import '../../../services/face_detection_service.dart';
 import '../../../services/location_service.dart';
 
 /// State Controller managing Attendance Check-In/Out workflow, Machine Attendance, Team Attendance,
-/// Location/GPS Validation, Camera Capture / Sample Image fallback, History timeline, and Persistence.
+/// Location/GPS Validation, Camera Capture with face verification, History timeline, and Persistence.
 class AttendanceController extends ChangeNotifier {
   final AttendanceRepository repository;
   final LocationService locationService;
   final AttendanceCameraService cameraService;
+  final AttendanceFaceDetectionService faceDetectionService;
 
   static const double maxLocationAccuracyMeters = 50.0;
 
   bool _isLoadingToday = true;
   bool _isSubmitting = false;
+  bool _isVerifyingFace = false;
   bool _isLoadingHistory = false;
   bool _isLoadingApprovals = false;
   String? _errorMessage;
   String? _infoMessage;
+  bool _faceVerified = false;
+  String? _faceRejectionMessage;
 
   AttendanceModel? _todayAttendance;
 
@@ -53,25 +59,44 @@ class AttendanceController extends ChangeNotifier {
     AttendanceRepository? repository,
     LocationService? locationService,
     AttendanceCameraService? cameraService,
+    AttendanceFaceDetectionService? faceDetectionService,
   })  : repository = repository ?? ApiAttendanceRepository(),
         locationService = locationService ?? AppLocationService(),
-        cameraService = cameraService ?? AttendanceCameraService();
+        cameraService = cameraService ?? AttendanceCameraService(),
+        faceDetectionService =
+            faceDetectionService ?? AttendanceFaceDetectionService();
 
   @override
   void notifyListeners() {
     if (_isDisposed) return;
+
+    // Avoid "setState()/markNeedsBuild() called during build" when fetch*
+    // methods are triggered from initState while a ListenableBuilder is mounting.
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (!_isDisposed) super.notifyListeners();
+      });
+      return;
+    }
+
     super.notifyListeners();
   }
 
   @override
   void dispose() {
     _isDisposed = true;
+    faceDetectionService.dispose();
     super.dispose();
   }
 
   // Getters
   bool get isLoadingToday => _isLoadingToday;
   bool get isSubmitting => _isSubmitting;
+  bool get isVerifyingFace => _isVerifyingFace;
+  bool get isFaceVerified => _faceVerified;
+  String? get faceRejectionMessage => _faceRejectionMessage;
   bool get isLoadingHistory => _isLoadingHistory;
   bool get isLoadingApprovals => _isLoadingApprovals;
   String? get errorMessage => _errorMessage;
@@ -345,9 +370,13 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
-  /// Open Camera and Capture Selfie
-  Future<bool> captureAttendancePhoto() async {
+  /// Open camera and capture attendance photo.
+  /// When [requireFace] is true (team attendance), rejects photos without a valid face.
+  Future<bool> captureAttendancePhoto({bool requireFace = false}) async {
     _errorMessage = null;
+    _infoMessage = null;
+    _faceVerified = false;
+    _faceRejectionMessage = null;
     notifyListeners();
 
     try {
@@ -359,16 +388,108 @@ class AttendanceController extends ChangeNotifier {
         return false;
       }
 
+      if (!requireFace) {
+        _capturedPhoto = photo;
+        _capturedPhotoPath = photo.path;
+        _capturedPhotoBytes = await photo.readAsBytes();
+        _faceVerified = false;
+        _faceRejectionMessage = null;
+        _errorMessage = null;
+        _infoMessage = 'Photo captured successfully.';
+        notifyListeners();
+        return true;
+      }
+
+      _isVerifyingFace = true;
+      notifyListeners();
+
+      final validation =
+          await faceDetectionService.validateAttendanceSelfie(photo.path);
+
+      _isVerifyingFace = false;
+
+      if (!validation.isValid) {
+        _capturedPhoto = null;
+        _capturedPhotoPath = null;
+        _capturedPhotoBytes = null;
+        _faceVerified = false;
+        _faceRejectionMessage = validation.message ??
+            'No face detected. Please look at the camera and retake a clear selfie.';
+        _errorMessage = null;
+        notifyListeners();
+        return false;
+      }
+
       _capturedPhoto = photo;
       _capturedPhotoPath = photo.path;
       _capturedPhotoBytes = await photo.readAsBytes();
+      _faceVerified = true;
+      _faceRejectionMessage = null;
+      _errorMessage = null;
+      _infoMessage = 'Face verified successfully.';
       notifyListeners();
       return true;
     } catch (e) {
+      _isVerifyingFace = false;
+      _faceVerified = false;
+      _capturedPhoto = null;
+      _capturedPhotoPath = null;
+      _capturedPhotoBytes = null;
+      _faceRejectionMessage = null;
       _errorMessage = e.toString().replaceAll('Exception: ', '');
       notifyListeners();
       return false;
     }
+  }
+
+  /// Re-run face checks before team attendance submit.
+  Future<bool> ensureFaceVerifiedForSubmit() async {
+    if (_capturedPhotoPath == null ||
+        _capturedPhotoBytes == null ||
+        _capturedPhotoBytes!.isEmpty) {
+      _faceRejectionMessage =
+          'A clear face selfie is required for team attendance.';
+      _errorMessage = null;
+      _faceVerified = false;
+      notifyListeners();
+      return false;
+    }
+
+    _isVerifyingFace = true;
+    _errorMessage = null;
+    _faceRejectionMessage = null;
+    notifyListeners();
+
+    final validation =
+        await faceDetectionService.validateAttendanceSelfie(_capturedPhotoPath!);
+
+    _isVerifyingFace = false;
+
+    if (!validation.isValid) {
+      _faceVerified = false;
+      _capturedPhoto = null;
+      _capturedPhotoPath = null;
+      _capturedPhotoBytes = null;
+      _faceRejectionMessage = validation.message ??
+          'No face detected. Please look at the camera and retake a clear selfie.';
+      _errorMessage = null;
+      notifyListeners();
+      return false;
+    }
+
+    _faceVerified = true;
+    _faceRejectionMessage = null;
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> _ensurePhotoCapturedForSubmit() async {
+    if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
+      _errorMessage = 'Please capture an attendance photo before submitting.';
+      notifyListeners();
+      return false;
+    }
+    return true;
   }
 
   /// Reset captured state for retaking photo / location
@@ -377,6 +498,9 @@ class AttendanceController extends ChangeNotifier {
     _capturedPhotoBytes = null;
     _capturedPhotoPath = null;
     _capturedLocation = null;
+    _faceVerified = false;
+    _faceRejectionMessage = null;
+    _isVerifyingFace = false;
     _errorMessage = null;
     _infoMessage = null;
     notifyListeners();
@@ -395,9 +519,7 @@ class AttendanceController extends ChangeNotifier {
       return false;
     }
 
-    if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
-      _errorMessage = 'Real-time camera photo capture is required to mark attendance.';
-      notifyListeners();
+    if (!await _ensurePhotoCapturedForSubmit()) {
       return false;
     }
 
@@ -450,9 +572,7 @@ class AttendanceController extends ChangeNotifier {
       return false;
     }
 
-    if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
-      _errorMessage = 'Real-time camera photo capture is required to mark attendance.';
-      notifyListeners();
+    if (!await ensureFaceVerifiedForSubmit()) {
       return false;
     }
 
@@ -515,9 +635,7 @@ class AttendanceController extends ChangeNotifier {
       return false;
     }
 
-    if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
-      _errorMessage = 'Real-time camera photo capture is required to mark attendance.';
-      notifyListeners();
+    if (!await _ensurePhotoCapturedForSubmit()) {
       return false;
     }
 
@@ -579,9 +697,7 @@ class AttendanceController extends ChangeNotifier {
       return false;
     }
 
-    if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
-      _errorMessage = 'Real-time camera photo capture is required to mark attendance.';
-      notifyListeners();
+    if (!await _ensurePhotoCapturedForSubmit()) {
       return false;
     }
 

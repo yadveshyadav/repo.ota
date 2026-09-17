@@ -22,8 +22,11 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
   @override
   void initState() {
     super.initState();
-    widget.controller.fetchAuthorizedTeamMembers();
-    widget.controller.fetchHistory();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.controller.fetchAuthorizedTeamMembers();
+      widget.controller.fetchHistory();
+    });
   }
 
   void _openTeamMemberCapture(UserModel member) async {

@@ -1,4 +1,5 @@
 import 'dart:io' show Directory, File;
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -65,7 +66,7 @@ class AttendanceCameraService {
       if (kDebugMode) {
         print('[AttendanceCameraService] Camera capture error: $e');
       }
-      throw Exception('Camera permission is required to capture attendance photo. You can use the "Use Sample Image" fallback for testing.');
+      throw Exception('Camera permission is required to capture attendance photo.');
     }
   }
 

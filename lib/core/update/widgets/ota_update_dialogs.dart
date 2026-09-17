@@ -8,12 +8,47 @@ import 'package:hero_app/core/update/services/ota_update_service.dart';
 
 /// Central Helper & Dialog Workflows for Hero OTA Update
 class OtaUpdateDialogs {
-  /// Execute central check for app updates and show mandatory dialog or status feedback
+  /// Execute central check for app updates and show mandatory dialog or status feedback.
+  /// APK OTA install is Android-only; on iOS automatic checks are skipped and
+  /// manual checks explain App Store updates.
   static Future<void> performAppUpdateCheck(
     BuildContext context, {
     bool isManualCheck = false,
     OtaUpdateService? updateService,
   }) async {
+    if (!OtaInstaller.isSupported) {
+      if (isManualCheck && context.mounted) {
+        final version = (await OtaUpdateService().getInstalledAppInfo()).version;
+        if (!context.mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text(
+              'Updates',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+            ),
+            content: Text(
+              'You are on version $version.\n\n'
+              'On iOS, updates are delivered through the App Store.',
+              style: const TextStyle(fontSize: 13, color: AppColors.mutedTextGray, height: 1.4),
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryGreen,
+                  foregroundColor: AppColors.white,
+                ),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
     final service = updateService ?? OtaUpdateService();
 
     if (isManualCheck) {

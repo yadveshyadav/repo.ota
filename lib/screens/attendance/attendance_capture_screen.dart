@@ -30,6 +30,9 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
   bool _isLocating = false;
   bool _isSubmittingDirectly = false;
 
+  /// Face detection applies only to team attendance (not machine).
+  bool get _requiresFace => widget.targetTeamMember != null;
+
   @override
   void initState() {
     super.initState();
@@ -56,19 +59,34 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
   }
 
   Future<void> _handleCameraCapture() async {
-    final success = await widget.controller.captureAttendancePhoto();
+    final success = await widget.controller.captureAttendancePhoto(
+      requireFace: _requiresFace,
+    );
     if (!mounted) return;
     if (success) {
       await widget.controller.captureFreshLocation();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Attendance photo & GPS location captured successfully'),
+        SnackBar(
+          content: Text(
+            _requiresFace
+                ? 'Face verified. Attendance photo & GPS captured successfully.'
+                : 'Attendance photo & GPS captured successfully.',
+          ),
           backgroundColor: AppColors.primaryGreen,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else if (widget.controller.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.controller.errorMessage!),
+          backgroundColor: AppColors.criticalRed,
+          duration: const Duration(seconds: 4),
         ),
       );
     }
+    // Face rejection is shown inline — no snackbar needed.
   }
 
   String _getAddressFromCoordinates(double lat, double lng) {
@@ -85,10 +103,17 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
 
   Future<void> _handleSubmitAttendanceDirectly() async {
     final c = widget.controller;
-    if (c.capturedPhotoBytes == null || c.capturedPhotoBytes!.isEmpty) {
+    final hasPhoto = c.capturedPhotoBytes != null && c.capturedPhotoBytes!.isNotEmpty;
+    final faceOk = !_requiresFace || c.isFaceVerified;
+
+    if (!hasPhoto || !faceOk) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please capture your attendance photo before submitting.'),
+        SnackBar(
+          content: Text(
+            _requiresFace
+                ? 'Please capture a verified face selfie before submitting.'
+                : 'Please capture an attendance photo before submitting.',
+          ),
           backgroundColor: AppColors.criticalRed,
         ),
       );
@@ -142,7 +167,11 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
       } else {
         messenger.showSnackBar(
           SnackBar(
-            content: Text(c.errorMessage ?? 'Attendance submission failed. Please try again.'),
+            content: Text(
+              c.faceRejectionMessage ??
+                  c.errorMessage ??
+                  'Attendance submission failed. Please try again.',
+            ),
             backgroundColor: AppColors.criticalRed,
           ),
         );
@@ -209,6 +238,11 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                             children: [
                               Text(widget.selectedMachine!.displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.deepNavy)),
                               Text('Chassis: ${widget.selectedMachine!.chassisNumber}', style: const TextStyle(fontSize: 11, color: AppColors.mutedTextGray, fontFamily: 'monospace')),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Face verification not required',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primaryGreen),
+                              ),
                             ],
                           ),
                         ),
@@ -235,6 +269,11 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                             children: [
                               Text('Marking Attendance For: ${widget.targetTeamMember!.displayName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.deepNavy)),
                               Text('Employee ID: ${widget.targetTeamMember!.displayEmployeeId}', style: const TextStyle(fontSize: 11, color: AppColors.mutedTextGray, fontFamily: 'monospace')),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Face selfie required for verification',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.infoBlue),
+                              ),
                             ],
                           ),
                         ),
@@ -274,9 +313,138 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                 _buildCardSection(
                   title: 'ATTENDANCE PHOTO',
                   icon: Icons.camera_alt_outlined,
+                  trailing: _requiresFace
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.criticalRed.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.35)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.face_retouching_natural, size: 12, color: AppColors.criticalRed),
+                              SizedBox(width: 4),
+                              Text(
+                                'FACE REQUIRED',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.criticalRed,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.mutedTextGray.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: AppColors.borderGray),
+                          ),
+                          child: const Text(
+                            'PHOTO ONLY',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.mutedTextGray,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
                   child: Column(
                     children: [
-                      if (photoBytes != null && photoBytes.isNotEmpty) ...[
+                      if (_requiresFace)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.infoBlue.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.infoBlue.withValues(alpha: 0.25)),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.face_retouching_natural, size: 18, color: AppColors.infoBlue),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Team attendance requires a clear face selfie. Look at the camera — photos without a detectable face will be rejected.',
+                                  style: TextStyle(fontSize: 12, color: AppColors.deepNavy, height: 1.35),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.softGray,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.borderGray),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.info_outline_rounded, size: 18, color: AppColors.mutedTextGray),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Machine attendance needs a site/work photo only. Face verification is not required.',
+                                  style: TextStyle(fontSize: 12, color: AppColors.deepNavy, height: 1.35),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (controller.isVerifyingFace) ...[
+                        Container(
+                          height: 160,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: AppColors.softGray,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.borderGray),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.primaryGreen),
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'Checking for a face...',
+                                style: TextStyle(color: AppColors.deepNavy, fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Please wait while we verify the selfie',
+                                style: TextStyle(color: AppColors.mutedTextGray, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (_requiresFace &&
+                          controller.faceRejectionMessage != null &&
+                          (photoBytes == null || photoBytes.isEmpty)) ...[
+                        _buildFaceNotDetectedCard(
+                          message: controller.faceRejectionMessage!,
+                          onRetake: (_isSubmittingDirectly || controller.isVerifyingFace)
+                              ? null
+                              : _handleCameraCapture,
+                        ),
+                      ] else if (photoBytes != null && photoBytes.isNotEmpty) ...[
                         Container(
                           height: 220,
                           width: double.infinity,
@@ -295,12 +463,31 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                             ),
                           ),
                         ),
+                        if (_requiresFace && controller.isFaceVerified) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            children: const [
+                              Icon(Icons.verified_user_rounded, size: 16, color: AppColors.primaryGreen),
+                              SizedBox(width: 6),
+                              Text(
+                                'Face verified',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.primaryGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         Row(
                           children: [
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: _isSubmittingDirectly ? null : _handleCameraCapture,
+                                onPressed: (_isSubmittingDirectly || controller.isVerifyingFace)
+                                    ? null
+                                    : _handleCameraCapture,
                                 icon: const Icon(Icons.refresh_rounded, size: 16),
                                 label: const Text('Retake Photo'),
                                 style: OutlinedButton.styleFrom(
@@ -322,10 +509,25 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                           ),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Icon(Icons.photo_camera_outlined, size: 40, color: AppColors.mutedTextGray),
-                              SizedBox(height: 8),
-                              Text('No photo captured yet', style: TextStyle(color: AppColors.mutedTextGray, fontSize: 13)),
+                            children: [
+                              Icon(
+                                _requiresFace ? Icons.face_outlined : Icons.photo_camera_outlined,
+                                size: 40,
+                                color: AppColors.mutedTextGray,
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'No photo captured yet',
+                                style: TextStyle(color: AppColors.mutedTextGray, fontSize: 13),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _requiresFace
+                                    ? 'Front camera selfie with a clear face required'
+                                    : 'Capture a site/work photo for machine attendance',
+                                style: const TextStyle(color: AppColors.mutedTextGray, fontSize: 11),
+                                textAlign: TextAlign.center,
+                              ),
                             ],
                           ),
                         ),
@@ -333,9 +535,14 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
-                            onPressed: _isSubmittingDirectly ? null : _handleCameraCapture,
-                            icon: const Icon(Icons.camera_alt_rounded, size: 18),
-                            label: const Text('Capture Real-Time Photo'),
+                            onPressed: (_isSubmittingDirectly || controller.isVerifyingFace)
+                                ? null
+                                : _handleCameraCapture,
+                            icon: Icon(
+                              _requiresFace ? Icons.face_retouching_natural : Icons.camera_alt_rounded,
+                              size: 18,
+                            ),
+                            label: Text(_requiresFace ? 'Capture Face Selfie' : 'Capture Photo'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primaryGreen,
                               foregroundColor: AppColors.white,
@@ -465,7 +672,9 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
                   width: double.infinity,
                   height: 48,
                   child: ElevatedButton.icon(
-                    onPressed: _isSubmittingDirectly ? null : _handleSubmitAttendanceDirectly,
+                    onPressed: (_isSubmittingDirectly || controller.isVerifyingFace)
+                        ? null
+                        : _handleSubmitAttendanceDirectly,
                     icon: _isSubmittingDirectly
                         ? const SizedBox(
                             width: 20,
@@ -493,10 +702,77 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
     );
   }
 
+  Widget _buildFaceNotDetectedCard({
+    required String message,
+    required VoidCallback? onRetake,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      decoration: BoxDecoration(
+        color: AppColors.criticalRed.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.35), width: 1.5),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.criticalRed.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.face_retouching_off,
+              size: 30,
+              color: AppColors.criticalRed,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Face not detected',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: AppColors.deepNavy,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppColors.mutedTextGray,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onRetake,
+              icon: const Icon(Icons.camera_alt_rounded, size: 18),
+              label: const Text('Retake Selfie'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.criticalRed,
+                foregroundColor: AppColors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCardSection({
     required String title,
     required IconData icon,
     required Widget child,
+    Widget? trailing,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -512,10 +788,13 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
             children: [
               Icon(icon, size: 18, color: AppColors.primaryGreen),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                ),
               ),
+              ?trailing,
             ],
           ),
           const Divider(height: 20, color: AppColors.borderGray),

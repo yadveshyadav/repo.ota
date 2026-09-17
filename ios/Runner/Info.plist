@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Hero App</string>
+	<string>HERO APP</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -24,8 +24,20 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>HERO APP needs camera access to capture attendance selfies and expense receipt photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>HERO APP needs your location to record attendance check-in and verify on-site work.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>HERO APP needs your location to record attendance check-in and verify on-site work.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>HERO APP needs photo library access to attach receipt images to expenses.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>HERO APP may save captured photos for attendance and expense records.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -38,8 +38,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     super.initState();
     _repository = widget.repository ?? ApiAttendanceRepository();
     _controller = AttendanceController(repository: _repository);
-    _controller.fetchTodayAttendance();
-    _controller.fetchHistory();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _controller.fetchTodayAttendance();
+      _controller.fetchHistory();
+    });
   }
 
   @override

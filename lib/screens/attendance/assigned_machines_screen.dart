@@ -22,8 +22,11 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen> {
   @override
   void initState() {
     super.initState();
-    widget.controller.fetchAssignedMachines();
-    widget.controller.fetchHistory();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.controller.fetchAssignedMachines();
+      widget.controller.fetchHistory();
+    });
   }
 
   void _openMachineCapture(Machine machine) {
