@@ -5,12 +5,12 @@ import 'package:hero_app/features/live_status/screens/live_status_screen.dart';
 import 'package:hero_app/features/live_status/widgets/live_machine_card.dart';
 import 'package:hero_app/features/live_status/widgets/live_status_filter_bar.dart';
 import 'package:hero_app/models/machine.dart';
-import 'package:hero_app/repositories/machine_repository.dart';
+
 
 void main() {
   group('LiveStatusController Unit Tests', () {
     late LiveStatusController controller;
-    late MockMachineRepository repository;
+
 
     setUp(() {
       repository = MockMachineRepository();

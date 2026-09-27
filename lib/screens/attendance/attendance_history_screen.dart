@@ -136,15 +136,25 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     final locSource = item.locationSource ?? 'GPS';
 
     Color statusColor = AppColors.primaryGreen;
-    if (item.isApproved || item.status == 'PRESENT') statusColor = AppColors.primaryGreen;
-    if (item.isRejected) statusColor = AppColors.criticalRed;
-    if (item.isPendingApproval) statusColor = AppColors.warningAmber;
+    String statusText = item.displayStatus.toUpperCase();
+    if (!item.isSynced) {
+      statusColor = AppColors.infoBlue;
+      statusText = 'OFFLINE (PENDING SYNC)';
+    } else if (item.isApproved || item.status == 'PRESENT') {
+      statusColor = AppColors.primaryGreen;
+    } else if (item.isRejected) {
+      statusColor = AppColors.criticalRed;
+    } else if (item.isPendingApproval) {
+      statusColor = AppColors.warningAmber;
+    }
 
     return Container(
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.borderGray),
+        border: Border.all(
+          color: !item.isSynced ? AppColors.infoBlue.withValues(alpha: 0.4) : AppColors.borderGray,
+        ),
         boxShadow: const [
           BoxShadow(color: Color(0x05000000), blurRadius: 4, offset: Offset(0, 2)),
         ],
@@ -210,7 +220,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
-                            '✓ ${item.displayStatus.toUpperCase()}',
+                            '• $statusText',
                             style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold),
                           ),
                         ),

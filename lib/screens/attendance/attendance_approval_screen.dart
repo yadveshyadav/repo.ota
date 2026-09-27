@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 import 'package:hero_app/core/utils/date_parser_utils.dart';
 import 'package:hero_app/features/attendance/controller/attendance_controller.dart';
@@ -26,6 +25,7 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
   String _selectedFilter = 'PENDING';
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _rejectionController = TextEditingController();
+  bool _isActionProcessing = false;
 
   @override
   void initState() {
@@ -42,7 +42,6 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
     super.dispose();
   }
 
-  /// Filters all records down to authorized team members only
   List<AttendanceModel> get _teamRecords {
     final Map<String, AttendanceModel> combined = {};
 
@@ -61,7 +60,6 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
     return combined.values.where((item) {
       if (currentUser == null) return true;
 
-      // Match by reporting manager ID
       if (item.reportingManagerId != null &&
           item.reportingManagerId!.isNotEmpty &&
           item.reportingManagerId == currentUser.id) {
@@ -116,172 +114,6 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
 
       return true;
     }).toList();
-  }
-
-  bool _isSelfRecord(AttendanceModel record) {
-    final currentUser = AuthStorageService().currentUser;
-    if (currentUser == null) return false;
-
-    final cId = currentUser.id;
-    final cEmpId = currentUser.employeeId ?? '';
-    final cUsername = currentUser.username.toLowerCase();
-    final cName = currentUser.displayName.toLowerCase();
-
-    return record.userId == cId ||
-        (record.employeeId != null && record.employeeId == cEmpId) ||
-        record.userName.toLowerCase() == cUsername ||
-        record.userName.toLowerCase() == cName;
-  }
-
-  Future<void> _handleApprove(AttendanceModel item) async {
-    final messenger = ScaffoldMessenger.of(context);
-
-    if (_isSelfRecord(item)) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('You cannot approve your own attendance record.'),
-          backgroundColor: AppColors.warningAmber,
-        ),
-      );
-      return;
-    }
-
-    final dateStr = item.checkInTime != null
-        ? DateFormat('dd MMMM yyyy').format(item.checkInTime!)
-        : DateFormat('dd MMMM yyyy').format(DateTime.now());
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Approve Attendance'),
-        content: Text('Are you sure you want to approve attendance for ${item.userName} ($dateStr)?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryGreen,
-              foregroundColor: AppColors.white,
-            ),
-            child: const Text('Approve'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final success = await widget.controller.approveAttendance(item.id);
-
-      if (mounted) {
-        if (success) {
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text('Attendance approved for ${item.userName}'),
-              backgroundColor: AppColors.primaryGreen,
-            ),
-          );
-        } else {
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(widget.controller.errorMessage ?? 'Unable to approve attendance. Please verify permissions.'),
-              backgroundColor: AppColors.criticalRed,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _handleReject(AttendanceModel item) async {
-    final messenger = ScaffoldMessenger.of(context);
-
-    if (_isSelfRecord(item)) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('You cannot reject your own attendance record.'),
-          backgroundColor: AppColors.warningAmber,
-        ),
-      );
-      return;
-    }
-
-    _rejectionController.clear();
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reject Attendance'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Please specify a reason for rejecting ${item.userName}\'s attendance:'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _rejectionController,
-              decoration: const InputDecoration(
-                hintText: 'e.g., Photo unclear, Location out of bounds',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 2,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (_rejectionController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please enter a rejection reason.'),
-                    backgroundColor: AppColors.criticalRed,
-                  ),
-                );
-                return;
-              }
-              Navigator.pop(ctx, true);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.criticalRed,
-              foregroundColor: AppColors.white,
-            ),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && _rejectionController.text.trim().isNotEmpty) {
-      final success = await widget.controller.rejectAttendance(
-        item.id,
-        _rejectionController.text.trim(),
-      );
-
-      if (mounted) {
-        if (success) {
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text('Attendance rejected for ${item.userName}'),
-              backgroundColor: AppColors.criticalRed,
-            ),
-          );
-        } else {
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(widget.controller.errorMessage ?? 'Unable to reject attendance.'),
-              backgroundColor: AppColors.criticalRed,
-            ),
-          );
-        }
-      }
-    }
   }
 
   @override
@@ -423,7 +255,7 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
 
               // Records List
               Expanded(
-                child: isLoading
+                child: isLoading || _isActionProcessing
                     ? const Center(child: CircularProgressIndicator(color: AppColors.primaryGreen))
                     : _filteredRecords.isEmpty
                         ? _buildEmptyState()
@@ -553,7 +385,6 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
         : '28.6139, 77.2090';
 
     final locSource = item.locationSource ?? 'GPS';
-    final isPending = item.isPendingApproval || item.status == 'PENDING';
 
     Color statusColor = AppColors.warningAmber;
     String statusLabel = 'PENDING APPROVAL';
@@ -707,77 +538,29 @@ class _AttendanceApprovalScreenState extends State<AttendanceApprovalScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Actions
-          if (isPending)
-            Row(
-              children: [
-                // Reject / Approve temporarily disabled
-                // Expanded(
-                //   child: OutlinedButton.icon(
-                //     onPressed: widget.controller.isSubmitting ? null : () => _handleReject(item),
-                //     icon: const Icon(Icons.cancel_outlined, size: 16, color: AppColors.criticalRed),
-                //     label: const Text('Reject', style: TextStyle(color: AppColors.criticalRed, fontWeight: FontWeight.bold, fontSize: 13)),
-                //     style: OutlinedButton.styleFrom(
-                //       side: const BorderSide(color: AppColors.criticalRed),
-                //       padding: const EdgeInsets.symmetric(vertical: 10),
-                //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                //     ),
-                //   ),
-                // ),
-                // const SizedBox(width: 10),
-                // Expanded(
-                //   child: ElevatedButton.icon(
-                //     onPressed: widget.controller.isSubmitting ? null : () => _handleApprove(item),
-                //     icon: const Icon(Icons.check_circle_outline, size: 16),
-                //     label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                //     style: ElevatedButton.styleFrom(
-                //       backgroundColor: AppColors.primaryGreen,
-                //       foregroundColor: AppColors.white,
-                //       padding: const EdgeInsets.symmetric(vertical: 10),
-                //       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                //     ),
-                //   ),
-                // ),
-                // const SizedBox(width: 10),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.visibility_outlined, size: 20, color: AppColors.primaryGreen),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => AttendanceDetailScreen(
-                          attendance: item,
-                          controller: widget.controller,
-                        ),
-                      ),
-                    );
-                  },
-                  tooltip: 'View Full Detail',
-                ),
-              ],
-            )
-          else
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AttendanceDetailScreen(
-                        attendance: item,
-                        controller: widget.controller,
-                      ),
+          // Action Buttons
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AttendanceDetailScreen(
+                      attendance: item,
+                      controller: widget.controller,
                     ),
-                  );
-                },
-                icon: const Icon(Icons.visibility_outlined, size: 16, color: AppColors.primaryGreen),
-                label: const Text('View Full Detail', style: TextStyle(color: AppColors.primaryGreen, fontWeight: FontWeight.bold)),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: AppColors.primaryGreen),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.visibility_outlined, size: 16),
+              label: const Text('View Full Attendance Detail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.deepNavy,
+                side: const BorderSide(color: AppColors.borderGray),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
             ),
+          ),
         ],
       ),
     );

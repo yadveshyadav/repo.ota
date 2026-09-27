@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import '../../models/alert.dart';
 import '../../models/dashboard_summary.dart';
 import '../../models/engine_hours.dart';
 import '../../models/fuel_analytics.dart';
 import '../../models/machine_location.dart';
 import '../../models/utilization.dart';
+import 'alert_api_service.dart';
 import 'api_client.dart';
 
 /// Dashboard API Service for contacting backend endpoints.
@@ -55,9 +57,15 @@ class DashboardApiService {
   }
 
   Future<List<Alert>> fetchActiveAlerts() async {
-    final response = await apiClient.get('/dashboard/active-alerts');
-    final list = response as List<dynamic>;
-    return list.map((json) => Alert.fromJson(json as Map<String, dynamic>)).toList();
+    try {
+      final alertRes = await AlertApiService(apiClient: apiClient).fetchAlerts(page: 1, size: 20);
+      return alertRes.alerts;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DashboardApiService] fetchActiveAlerts error: $e');
+      }
+      return [];
+    }
   }
 
   Future<List<MachineLocation>> fetchLiveLocations() async {

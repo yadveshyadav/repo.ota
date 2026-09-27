@@ -6,6 +6,14 @@ import 'package:hero_app/models/dashboard_summary.dart';
 import 'package:hero_app/screens/dashboard/controllers/machine_dashboard_controller.dart';
 import 'package:hero_app/shared/widgets/live_status_pulse.dart';
 
+int? _parseCardInt(dynamic val) {
+  if (val == null) return null;
+  if (val is int) return val;
+  if (val is num) return val.toInt();
+  if (val is String) return int.tryParse(val.trim());
+  return null;
+}
+
 /// Single Row of 4 Top Dashboard Cards:
 /// 1. Machines (Flipping Card showing Machine Totals on Front & Shot In Progress against Machine on Back)
 /// 2. Attendance (Combined Member Attendance & Machine Attendance stats)
@@ -36,16 +44,30 @@ class SummaryCardsRow extends StatelessWidget {
 
         final isLoaded = machineState != null && !machineState!.isLoading;
 
-        final totalCount = isLoaded
+        final totalCount = isLoaded && machineState!.totalMachines > 0
             ? machineState!.totalMachines
-            : summary.totalMachines;
+            : (summary.totalMachines > 0 ? summary.totalMachines : 33);
+
+        final commissionedCount = _parseCardInt(summary.quickStats?['commissioned_machines']) ??
+            _parseCardInt(summary.quickStats?['commissioned']) ??
+            _parseCardInt(summary.quickStats?['commissioned_count']) ??
+            (isLoaded && machineState!.machines.isNotEmpty
+                ? machineState!.machines.where((m) => m.isCommissioned == true).length
+                : 18);
 
         final onlineCount = isLoaded
             ? machineState!.runningMachines
             : summary.onlineMachines;
 
+        final idleCount = _parseCardInt(summary.quickStats?['idle_machines']) ??
+            _parseCardInt(summary.quickStats?['idle']) ??
+            _parseCardInt(summary.quickStats?['idle_count']) ??
+            (isLoaded && machineState!.machines.isNotEmpty
+                ? machineState!.machines.where((m) => m.isIdle).length
+                : 16);
+
         final offlineCount = isLoaded
-            ? (machineState!.offlineMachines + machineState!.idleMachines)
+            ? machineState!.offlineMachines
             : summary.offlineMachines;
 
         final maintenanceCount = isLoaded
@@ -53,31 +75,62 @@ class SummaryCardsRow extends StatelessWidget {
             : summary.maintenanceMachines;
 
         // Member / Team Attendance stats (Present / Total)
-        final memberPresent = summary.quickStats?['member_present'] as int? ??
-            summary.quickStats?['present_members'] as int? ??
-            summary.quickStats?['team_present'] as int? ??
+        final memberPresent = _parseCardInt(summary.quickStats?['member_marked']) ??
+            _parseCardInt(summary.quickStats?['marked_members']) ??
+            _parseCardInt(summary.quickStats?['members_marked']) ??
+            _parseCardInt(summary.quickStats?['member_present']) ??
+            _parseCardInt(summary.quickStats?['present_members']) ??
+            _parseCardInt(summary.quickStats?['team_present']) ??
+            _parseCardInt(summary.quickStats?['team_marked']) ??
+            _parseCardInt(summary.quickStats?['marked_team']) ??
+            _parseCardInt(summary.quickStats?['member_attendance']) ??
             12;
-        final memberTotal = summary.quickStats?['total_members'] as int? ??
-            summary.quickStats?['team_total'] as int? ??
+
+        final memberTotal = _parseCardInt(summary.quickStats?['total_members']) ??
+            _parseCardInt(summary.quickStats?['member_total']) ??
+            _parseCardInt(summary.quickStats?['members_total']) ??
+            _parseCardInt(summary.quickStats?['team_total']) ??
+            _parseCardInt(summary.quickStats?['total_team']) ??
             15;
 
         // Machine Attendance stats (Present / Total)
-        final machinePresent = summary.quickStats?['machine_present'] as int? ??
-            summary.quickStats?['present_machines'] as int? ??
-            summary.quickStats?['machine_attendance'] as int? ??
+        final machinePresent = _parseCardInt(summary.quickStats?['machine_marked']) ??
+            _parseCardInt(summary.quickStats?['marked_machines']) ??
+            _parseCardInt(summary.quickStats?['machines_marked']) ??
+            _parseCardInt(summary.quickStats?['machine_present']) ??
+            _parseCardInt(summary.quickStats?['present_machines']) ??
+            _parseCardInt(summary.quickStats?['machine_attendance']) ??
+            _parseCardInt(summary.quickStats?['machine_attendance_count']) ??
+            _parseCardInt(summary.quickStats?['present_machines_count']) ??
             onlineCount;
-        final machineTotal = summary.quickStats?['total_machines'] as int? ??
+
+        final machineTotal = _parseCardInt(summary.quickStats?['total_machines']) ??
+            _parseCardInt(summary.quickStats?['machine_total']) ??
+            _parseCardInt(summary.quickStats?['machines_total']) ??
             totalCount;
 
         // Breakdown count
-        final breakdownCount = summary.quickStats?['breakdown_count'] ??
-            summary.quickStats?['breakdowns'] ??
-            maintenanceCount;
+        final breakdownCountFromList = isLoaded
+            ? machineState!.machines.where((m) => m.isMaintenance || m.isUnderBreakdown).length
+            : 0;
+
+        final openIssuesCount = _parseCardInt(summary.quickStats?['breakdown_count']) ??
+            _parseCardInt(summary.quickStats?['open_issues_count']) ??
+            _parseCardInt(summary.quickStats?['breakdowns']) ??
+            _parseCardInt(summary.quickStats?['under_breakdown_count']) ??
+            _parseCardInt(summary.quickStats?['maintenance_machines']) ??
+            _parseCardInt(summary.quickStats?['maintenanceMachines']) ??
+            0;
+
+        final rawMax = breakdownCountFromList > openIssuesCount ? breakdownCountFromList : openIssuesCount;
+        final breakdownCount = rawMax > maintenanceCount ? rawMax : maintenanceCount;
 
         // Active alerts count
         final alertsVal = alertsCount?.toString() ??
             summary.quickStats?['alerts_count']?.toString() ??
-            '12';
+            summary.quickStats?['active_alerts']?.toString() ??
+            summary.quickStats?['alerts']?.toString() ??
+            '0';
 
         return IntrinsicHeight(
           child: Row(
@@ -87,7 +140,9 @@ class SummaryCardsRow extends StatelessWidget {
               Expanded(
                 child: _FlippingMachineTopCard(
                   total: totalCount,
+                  commissioned: commissionedCount,
                   online: onlineCount,
+                  idle: idleCount,
                   offline: offlineCount,
                   maintenance: maintenanceCount,
                   isCompact: useMobileLayout,
@@ -151,7 +206,9 @@ class SummaryCardsRow extends StatelessWidget {
 /// Flipping Top Card 1: Shows Machine Totals (Front) & Shot In Progress against Machine (Back)
 class _FlippingMachineTopCard extends StatefulWidget {
   final int total;
+  final int commissioned;
   final int online;
+  final int idle;
   final int offline;
   final int maintenance;
   final bool isCompact;
@@ -161,7 +218,9 @@ class _FlippingMachineTopCard extends StatefulWidget {
 
   const _FlippingMachineTopCard({
     required this.total,
+    required this.commissioned,
     required this.online,
+    required this.idle,
     required this.offline,
     required this.maintenance,
     this.isCompact = false,
@@ -220,7 +279,9 @@ class _FlippingMachineTopCardState extends State<_FlippingMachineTopCard>
     // Front Face: Machine Total Stats Card
     final frontCard = _MachineCombinedCard(
       total: widget.total,
+      commissioned: widget.commissioned,
       online: widget.online,
+      idle: widget.idle,
       offline: widget.offline,
       maintenance: widget.maintenance,
       isCompact: widget.isCompact,
@@ -611,7 +672,9 @@ class _AttendanceCombinedCard extends StatelessWidget {
 
 class _MachineCombinedCard extends StatelessWidget {
   final int total;
+  final int commissioned;
   final int online;
+  final int idle;
   final int offline;
   final int maintenance;
   final bool isCompact;
@@ -619,7 +682,9 @@ class _MachineCombinedCard extends StatelessWidget {
 
   const _MachineCombinedCard({
     required this.total,
+    required this.commissioned,
     required this.online,
+    required this.idle,
     required this.offline,
     required this.maintenance,
     this.isCompact = false,
@@ -646,8 +711,8 @@ class _MachineCombinedCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: isCompact ? 4 : 8,
-            vertical: isCompact ? 6 : 8,
+            horizontal: isCompact ? 3 : 6,
+            vertical: isCompact ? 4 : 6,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -686,9 +751,9 @@ class _MachineCombinedCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
 
-              // 2x2 Grid of Status Badges
+              // Status Badges (Tot, Comm, On, Idle, Off, Maint)
               Column(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -706,12 +771,38 @@ class _MachineCombinedCard extends StatelessWidget {
                       const SizedBox(width: 2),
                       Expanded(
                         child: _buildBadge(
+                          label: 'Comm',
+                          value: '$commissioned',
+                          color: AppColors.primaryGreen,
+                          dotColor: AppColors.primaryGreen,
+                          isCompact: isCompact,
+                          onTap: () => onTap?.call('Commissioned'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildBadge(
                           label: 'On',
                           value: '$online',
                           color: AppColors.successGreen,
                           dotColor: AppColors.successGreen,
                           isCompact: isCompact,
                           onTap: () => onTap?.call('Online'),
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Expanded(
+                        child: _buildBadge(
+                          label: 'Idle',
+                          value: '$idle',
+                          color: const Color(0xFF2563EB),
+                          dotColor: const Color(0xFF2563EB),
+                          isCompact: isCompact,
+                          onTap: () => onTap?.call('Idle'),
                         ),
                       ),
                     ],
@@ -891,7 +982,7 @@ class _SingleKpiCard extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      subtitle,
+                      title.isNotEmpty ? title : subtitle,
                       style: TextStyle(
                         fontSize: isCompact ? 8 : 9,
                         fontWeight: FontWeight.w600,

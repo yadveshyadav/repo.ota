@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../models/attendance_location.dart';
 import '../../../models/attendance_model.dart';
 import '../../../models/machine.dart';
+import '../../../models/muster_model.dart';
 import '../../auth/models/user_model.dart';
 import '../../auth/services/auth_storage_service.dart';
 import '../../../repositories/attendance_repository.dart';
@@ -14,7 +16,7 @@ import '../../../services/face_detection_service.dart';
 import '../../../services/location_service.dart';
 
 /// State Controller managing Attendance Check-In/Out workflow, Machine Attendance, Team Attendance,
-/// Location/GPS Validation, Camera Capture with face verification, History timeline, and Persistence.
+/// Netinfra DailyMuster submission, Location/GPS Validation, Camera Capture with face verification, History timeline, and Persistence.
 class AttendanceController extends ChangeNotifier {
   final AttendanceRepository repository;
   final LocationService locationService;
@@ -29,12 +31,16 @@ class AttendanceController extends ChangeNotifier {
   bool _isVerifyingFace = false;
   bool _isLoadingHistory = false;
   bool _isLoadingApprovals = false;
+  bool _isSyncing = false;
   String? _errorMessage;
   String? _infoMessage;
   bool _faceVerified = false;
   String? _faceRejectionMessage;
 
   AttendanceModel? _todayAttendance;
+
+  // Selected Task Context for Muster Integration
+  String? _selectedTaskId;
 
   // Machine Attendance & Team Attendance Lists
   List<Machine> _assignedMachines = [];
@@ -57,7 +63,9 @@ class AttendanceController extends ChangeNotifier {
 
   List<AttendanceModel> _history = [];
   List<AttendanceModel> _pendingApprovals = [];
+  List<DailyMuster> _pendingMusterApprovals = [];
   bool _isDisposed = false;
+  Timer? _autoSyncTimer;
 
   AttendanceController({
     AttendanceRepository? repository,
@@ -71,14 +79,30 @@ class AttendanceController extends ChangeNotifier {
         faceDetectionService =
             faceDetectionService ?? AttendanceFaceDetectionService(),
         photoStampService =
-            photoStampService ?? AttendancePhotoStampService();
+            photoStampService ?? AttendancePhotoStampService() {
+    _startAutoSyncTimer();
+  }
+
+  void _startAutoSyncTimer() {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer.periodic(const Duration(minutes: 2), (_) async {
+      if (_isDisposed) return;
+      try {
+        final unsynced = await AttendanceStorageService().getUnsyncedRecords();
+        if (unsynced.isNotEmpty) {
+          if (kDebugMode) {
+            print('[AttendanceController] 2-min auto-sync triggered for ${unsynced.length} pending record(s)...');
+          }
+          await syncPendingAttendance();
+        }
+      } catch (_) {}
+    });
+  }
 
   @override
   void notifyListeners() {
     if (_isDisposed) return;
 
-    // Avoid "setState()/markNeedsBuild() called during build" when fetch*
-    // methods are triggered from initState while a ListenableBuilder is mounting.
     final phase = SchedulerBinding.instance.schedulerPhase;
     if (phase == SchedulerPhase.persistentCallbacks ||
         phase == SchedulerPhase.midFrameMicrotasks) {
@@ -94,8 +118,16 @@ class AttendanceController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    _autoSyncTimer?.cancel();
     faceDetectionService.dispose();
     super.dispose();
+  }
+
+  /// Helper for unit testing photo capture state
+  void setTestCapturedPhoto(XFile photo, List<int> photoBytes) {
+    _capturedPhoto = photo;
+    _capturedPhotoBytes = Uint8List.fromList(photoBytes);
+    _faceVerified = true;
   }
 
   // Getters
@@ -106,8 +138,16 @@ class AttendanceController extends ChangeNotifier {
   String? get faceRejectionMessage => _faceRejectionMessage;
   bool get isLoadingHistory => _isLoadingHistory;
   bool get isLoadingApprovals => _isLoadingApprovals;
+  bool get isSyncing => _isSyncing;
+  int get unsyncedCount => _history.where((r) => !r.isSynced).length;
   String? get errorMessage => _errorMessage;
   String? get infoMessage => _infoMessage;
+
+  String? get selectedTaskId => _selectedTaskId;
+  void setSelectedTaskId(String? taskId) {
+    _selectedTaskId = taskId;
+    notifyListeners();
+  }
 
   AttendanceModel? get todayAttendance => _todayAttendance;
   List<Machine> get assignedMachines => _assignedMachines;
@@ -123,25 +163,80 @@ class AttendanceController extends ChangeNotifier {
 
   List<AttendanceModel> get history => _history;
   List<AttendanceModel> get pendingApprovals => _pendingApprovals;
+  List<DailyMuster> get pendingMusterApprovals => _pendingMusterApprovals;
 
-  void _registerTeamAttendanceRecord(AttendanceModel record) {
+  /// Returns count of unique machines marked today
+  int get markedMachineCount {
+    if (_assignedMachines.isNotEmpty) {
+      int count = 0;
+      for (final m in _assignedMachines) {
+        if (getTodayAttendanceForMachine(m.chassisNumber) != null) {
+          count++;
+        }
+      }
+      return count;
+    }
+
     final now = DateTime.now();
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
       return local.year == now.year && local.month == now.month && local.day == now.day;
     }
+    final records = _markedMachineAttendanceMap.values
+        .where((r) => isSameDay(r.checkInTime ?? r.createdAt))
+        .map((r) => r.id)
+        .toSet();
+    return records.length;
+  }
 
-    final dt = record.checkInTime ?? record.createdAt;
-    if (!isSameDay(dt)) return;
+  /// Returns count of unique members marked today
+  int get markedMemberCount {
+    final now = DateTime.now();
+    bool isSameDay(DateTime? dt) {
+      if (dt == null) return false;
+      final local = dt.toLocal();
+      return local.year == now.year && local.month == now.month && local.day == now.day;
+    }
+    final records = _markedTeamAttendanceMap.values
+        .where((r) => isSameDay(r.checkInTime ?? r.createdAt))
+        .map((r) => r.id)
+        .toSet();
+    return records.length;
+  }
+
+  void _registerTeamAttendanceRecord(AttendanceModel record) {
+    final checkInTime = record.checkInTime;
+    if (checkInTime == null) return;
+
+    final statusUpper = record.status.toUpperCase();
+    if (statusUpper == 'NOT_MARKED' ||
+        statusUpper == 'NOT_CHECKED_IN' ||
+        statusUpper == 'REJECTED' ||
+        record.approvalStatus == 'REJECTED') {
+      return;
+    }
+
+    final now = DateTime.now();
+    bool isSameDay(DateTime dt) {
+      final local = dt.toLocal();
+      final nowLocal = now.toLocal();
+      return local.year == nowLocal.year && local.month == nowLocal.month && local.day == nowLocal.day;
+    }
+
+    if (!isSameDay(checkInTime)) return;
 
     if (record.isMachineAttendance) {
-      if (record.machineChassisNo != null && record.machineChassisNo!.trim().isNotEmpty) {
-        _markedMachineAttendanceMap[record.machineChassisNo!.trim().toLowerCase()] = record;
+      void addChassisKey(String? chassis) {
+        if (chassis == null) return;
+        final clean = chassis.trim().toLowerCase();
+        if (clean.isEmpty || clean == 'n/a' || clean.length < 4) return;
+        _markedMachineAttendanceMap[clean] = record;
       }
-      if (record.machineId != null && record.machineId!.trim().isNotEmpty) {
-        _markedMachineAttendanceMap[record.machineId!.trim().toLowerCase()] = record;
-      }
+
+      addChassisKey(record.machineChassisNo);
+      addChassisKey(record.machineId);
+      addChassisKey(record.machineAssignmentId);
     } else {
       if (record.userId.trim().isNotEmpty) {
         _markedTeamAttendanceMap[record.userId.trim().toLowerCase()] = record;
@@ -152,9 +247,6 @@ class AttendanceController extends ChangeNotifier {
       if (record.employeeId != null && record.employeeId!.trim().isNotEmpty) {
         _markedTeamAttendanceMap[record.employeeId!.trim().toLowerCase()] = record;
       }
-      if (record.userName.trim().isNotEmpty) {
-        _markedTeamAttendanceMap[record.userName.trim().toLowerCase()] = record;
-      }
     }
 
     _history.removeWhere((item) => item.id == record.id);
@@ -164,9 +256,9 @@ class AttendanceController extends ChangeNotifier {
   Future<void> _syncLocalTeamRecords() async {
     try {
       final localRecords = await AttendanceStorageService().getAllRecords();
-      final now = DateTime.now();
+      final now = DateTime.now().toLocal();
       for (final rec in localRecords) {
-        final dt = rec.checkInTime ?? rec.createdAt;
+        final dt = rec.checkInTime?.toLocal();
         if (dt != null && dt.year == now.year && dt.month == now.month && dt.day == now.day) {
           _registerTeamAttendanceRecord(rec);
         }
@@ -176,58 +268,58 @@ class AttendanceController extends ChangeNotifier {
 
   /// Returns today's active attendance record for a specific team member or user ID, if any.
   AttendanceModel? getTodayAttendanceForUser(String targetUserId, {String? employeeId, String? userName}) {
-    final now = DateTime.now();
+    final nowLocal = DateTime.now().toLocal();
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
-      return local.year == now.year && local.month == now.month && local.day == now.day;
+      return local.year == nowLocal.year && local.month == nowLocal.month && local.day == nowLocal.day;
     }
 
     final idClean = targetUserId.trim().toLowerCase();
     final empClean = employeeId?.trim().toLowerCase() ?? '';
-    final nameClean = userName?.trim().toLowerCase() ?? '';
 
-    // 1. Check in-memory map first
     if (idClean.isNotEmpty && _markedTeamAttendanceMap.containsKey(idClean)) {
       final rec = _markedTeamAttendanceMap[idClean]!;
-      if (isSameDay(rec.checkInTime ?? rec.createdAt)) return rec;
+      if (rec.checkInTime != null && isSameDay(rec.checkInTime)) return rec;
     }
     if (empClean.isNotEmpty && _markedTeamAttendanceMap.containsKey(empClean)) {
       final rec = _markedTeamAttendanceMap[empClean]!;
-      if (isSameDay(rec.checkInTime ?? rec.createdAt)) return rec;
-    }
-    if (nameClean.isNotEmpty && _markedTeamAttendanceMap.containsKey(nameClean)) {
-      final rec = _markedTeamAttendanceMap[nameClean]!;
-      if (isSameDay(rec.checkInTime ?? rec.createdAt)) return rec;
+      if (rec.checkInTime != null && isSameDay(rec.checkInTime)) return rec;
     }
 
-    // 2. Check todayAttendance (ensure it is personal/team attendance)
     if (_todayAttendance != null && !_todayAttendance!.isMachineAttendance) {
       final t = _todayAttendance!;
       final matchesUser = (t.userId.toLowerCase().trim() == idClean) ||
           (t.markedForUserId != null && t.markedForUserId!.toLowerCase().trim() == idClean) ||
-          (empClean.isNotEmpty && t.employeeId != null && t.employeeId!.toLowerCase().trim() == empClean) ||
-          (nameClean.isNotEmpty && t.userName.toLowerCase().trim() == nameClean);
+          (empClean.isNotEmpty && t.employeeId != null && t.employeeId!.toLowerCase().trim() == empClean);
 
-      final isMarkedStatus = t.status != 'NOT_CHECKED_IN' && t.status != 'REJECTED' && t.approvalStatus != 'REJECTED';
+      final statusUpper = t.status.toUpperCase();
+      final isMarkedStatus = t.checkInTime != null &&
+          statusUpper != 'NOT_MARKED' &&
+          statusUpper != 'NOT_CHECKED_IN' &&
+          statusUpper != 'REJECTED' &&
+          t.approvalStatus != 'REJECTED';
 
-      if (matchesUser && isSameDay(t.checkInTime ?? t.createdAt) && isMarkedStatus) {
+      if (matchesUser && isSameDay(t.checkInTime) && isMarkedStatus) {
         return t;
       }
     }
 
-    // 3. Check history records (ensure non-machine attendance)
     for (final record in _history) {
       if (record.isMachineAttendance) continue;
       final matchesUser = (record.userId.toLowerCase().trim() == idClean) ||
           (record.markedForUserId != null && record.markedForUserId!.toLowerCase().trim() == idClean) ||
-          (empClean.isNotEmpty && record.employeeId != null && record.employeeId!.toLowerCase().trim() == empClean) ||
-          (nameClean.isNotEmpty && record.userName.toLowerCase().trim() == nameClean);
+          (empClean.isNotEmpty && record.employeeId != null && record.employeeId!.toLowerCase().trim() == empClean);
 
-      final recordDate = record.checkInTime ?? record.createdAt;
-      final isMarkedStatus = record.status != 'NOT_CHECKED_IN' && record.status != 'REJECTED' && record.approvalStatus != 'REJECTED';
+      final checkInTime = record.checkInTime;
+      final statusUpper = record.status.toUpperCase();
+      final isMarkedStatus = checkInTime != null &&
+          statusUpper != 'NOT_MARKED' &&
+          statusUpper != 'NOT_CHECKED_IN' &&
+          statusUpper != 'REJECTED' &&
+          record.approvalStatus != 'REJECTED';
 
-      if (matchesUser && isSameDay(recordDate) && isMarkedStatus) {
+      if (matchesUser && checkInTime != null && isSameDay(checkInTime) && isMarkedStatus) {
         return record;
       }
     }
@@ -237,44 +329,125 @@ class AttendanceController extends ChangeNotifier {
 
   /// Returns today's active attendance record for a specific machine chassis number, if any.
   AttendanceModel? getTodayAttendanceForMachine(String chassisNo) {
-    final now = DateTime.now();
+    final nowLocal = DateTime.now().toLocal();
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
-      return local.year == now.year && local.month == now.month && local.day == now.day;
+      return local.year == nowLocal.year && local.month == nowLocal.month && local.day == nowLocal.day;
     }
 
     final chassisLower = chassisNo.toLowerCase().trim();
+    if (chassisLower.isEmpty || chassisLower == 'n/a') return null;
 
-    if (chassisLower.isNotEmpty && _markedMachineAttendanceMap.containsKey(chassisLower)) {
-      final rec = _markedMachineAttendanceMap[chassisLower]!;
-      if (isSameDay(rec.checkInTime ?? rec.createdAt)) return rec;
+    bool isMachineMatch(String? candidateNo, String? candidateId) {
+      final cNo = candidateNo?.toLowerCase().trim() ?? '';
+      final mId = candidateId?.toLowerCase().trim() ?? '';
+
+      if (cNo.isNotEmpty && cNo != 'n/a') {
+        if (cNo == chassisLower) return true;
+        if (cNo.length >= 6 && chassisLower.length >= 6 && (cNo.endsWith(chassisLower) || chassisLower.endsWith(cNo))) {
+          return true;
+        }
+      }
+      if (mId.isNotEmpty && mId != 'n/a') {
+        if (mId == chassisLower) return true;
+        if (mId.length >= 6 && chassisLower.length >= 6 && (mId.endsWith(chassisLower) || chassisLower.endsWith(mId))) {
+          return true;
+        }
+      }
+      return false;
     }
 
+    // 1. Direct exact map lookup
+    if (_markedMachineAttendanceMap.containsKey(chassisLower)) {
+      final rec = _markedMachineAttendanceMap[chassisLower]!;
+      final statusUpper = rec.status.toUpperCase();
+      final isMarkedStatus = rec.checkInTime != null &&
+          statusUpper != 'NOT_MARKED' &&
+          statusUpper != 'NOT_CHECKED_IN' &&
+          statusUpper != 'REJECTED' &&
+          rec.approvalStatus != 'REJECTED';
+      if (rec.checkInTime != null && isSameDay(rec.checkInTime) && isMarkedStatus) return rec;
+    }
+
+    // 2. Strict key match in map
+    for (final entry in _markedMachineAttendanceMap.entries) {
+      final key = entry.key;
+      if (key.length < 4 || key == 'n/a') continue;
+
+      if (isMachineMatch(key, null)) {
+        final rec = entry.value;
+        final statusUpper = rec.status.toUpperCase();
+        final isMarkedStatus = rec.checkInTime != null &&
+            statusUpper != 'NOT_MARKED' &&
+            statusUpper != 'NOT_CHECKED_IN' &&
+            statusUpper != 'REJECTED' &&
+            rec.approvalStatus != 'REJECTED';
+        if (rec.checkInTime != null && isSameDay(rec.checkInTime) && isMarkedStatus) return rec;
+      }
+    }
+
+    // 3. Active today record check
     if (_todayAttendance != null && _todayAttendance!.isMachineAttendance) {
       final t = _todayAttendance!;
-      final matchesMachine = (t.machineChassisNo != null && t.machineChassisNo!.toLowerCase().trim() == chassisLower) ||
-          (t.machineId != null && t.machineId!.toLowerCase().trim() == chassisLower);
-      final isMarkedStatus = t.status != 'NOT_CHECKED_IN' && t.status != 'REJECTED' && t.approvalStatus != 'REJECTED';
+      final matchesMachine = isMachineMatch(t.machineChassisNo, t.machineId);
 
-      if (matchesMachine && isSameDay(t.checkInTime ?? t.createdAt) && isMarkedStatus) {
+      final statusUpper = t.status.toUpperCase();
+      final isMarkedStatus = t.checkInTime != null &&
+          statusUpper != 'NOT_MARKED' &&
+          statusUpper != 'NOT_CHECKED_IN' &&
+          statusUpper != 'REJECTED' &&
+          t.approvalStatus != 'REJECTED';
+
+      if (matchesMachine && t.checkInTime != null && isSameDay(t.checkInTime) && isMarkedStatus) {
         return t;
       }
     }
 
+    // 4. Strict history check
     for (final record in _history) {
       if (!record.isMachineAttendance) continue;
-      final matchesMachine = (record.machineChassisNo != null && record.machineChassisNo!.toLowerCase().trim() == chassisLower) ||
-          (record.machineId != null && record.machineId!.toLowerCase().trim() == chassisLower);
-      final recordDate = record.checkInTime ?? record.createdAt;
-      final isMarkedStatus = record.status != 'NOT_CHECKED_IN' && record.status != 'REJECTED' && record.approvalStatus != 'REJECTED';
 
-      if (matchesMachine && isSameDay(recordDate) && isMarkedStatus) {
+      final matchesMachine = isMachineMatch(record.machineChassisNo, record.machineId);
+      final checkInTime = record.checkInTime;
+      final statusUpper = record.status.toUpperCase();
+      final isMarkedStatus = checkInTime != null &&
+          statusUpper != 'NOT_MARKED' &&
+          statusUpper != 'NOT_CHECKED_IN' &&
+          statusUpper != 'REJECTED' &&
+          record.approvalStatus != 'REJECTED';
+
+      if (matchesMachine && checkInTime != null && isSameDay(checkInTime) && isMarkedStatus) {
         return record;
       }
     }
 
     return null;
+  }
+
+  /// Sync any pending offline attendance records with server
+  Future<int> syncPendingAttendance() async {
+    if (_isSyncing) return 0;
+    _isSyncing = true;
+    notifyListeners();
+
+    try {
+      final count = await repository.syncPendingRecords();
+      if (count > 0) {
+        _infoMessage = 'Successfully synced $count offline attendance record(s) with server.';
+        await fetchHistory();
+        await fetchTodayAttendance();
+      }
+      return count;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceController] Sync error: $e');
+      }
+      return 0;
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
+    }
   }
 
   /// Load today's attendance record
@@ -291,6 +464,7 @@ class AttendanceController extends ChangeNotifier {
       await _syncLocalTeamRecords();
       _isLoadingToday = false;
       notifyListeners();
+      syncPendingAttendance();
     } catch (e) {
       _isLoadingToday = false;
       if (kDebugMode) {
@@ -375,7 +549,7 @@ class AttendanceController extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceAll('Exception: ', '');
+      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
       _infoMessage = null;
       notifyListeners();
       return false;
@@ -383,7 +557,6 @@ class AttendanceController extends ChangeNotifier {
   }
 
   /// Open camera and capture attendance photo.
-  /// When [requireFace] is true (team attendance), rejects photos without a valid face.
   Future<bool> captureAttendancePhoto({bool requireFace = false}) async {
     _errorMessage = null;
     _infoMessage = null;
@@ -454,8 +627,7 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
-  /// Burns lat/lng + phone onto the captured photo for on-screen proof and upload.
-  /// Keeps face-verified state; only the image bytes are replaced with the stamped copy.
+  /// Burns lat/lng + phone onto the captured photo for proof
   Future<bool> stampCapturedPhotoProof({required String phoneNumber}) async {
     if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
       return false;
@@ -476,8 +648,6 @@ class AttendanceController extends ChangeNotifier {
         phoneNumber: phoneNumber,
       );
       _capturedPhotoBytes = stamped;
-      // Prefer memory preview of stamped bytes over original file path.
-      // Do NOT clear _faceVerified — verification already happened at capture.
       _capturedPhotoPath = null;
       notifyListeners();
       return true;
@@ -489,7 +659,6 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
-  /// Submit gate: only require that a photo was captured (team face ML runs at selfie only).
   Future<bool> _ensurePhotoCapturedForSubmit() async {
     if (_capturedPhotoBytes == null || _capturedPhotoBytes!.isEmpty) {
       _errorMessage = 'Please capture an attendance photo before submitting.';
@@ -500,7 +669,6 @@ class AttendanceController extends ChangeNotifier {
     return true;
   }
 
-  /// Reset captured state for retaking photo / location
   void resetCaptureState() {
     _capturedPhoto = null;
     _capturedPhotoBytes = null;
@@ -514,15 +682,50 @@ class AttendanceController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ============================================================================
+  // NETINFRA TASK MUSTER API FLOW
+  // ============================================================================
+
+  /// Task Attendance Submission Flow routing directly to Pramaanu REST API
+  Future<bool> markTaskMusterAttendance({
+    required String taskId,
+    String? teamSource,
+    String? vendorId,
+    String? vendorName,
+    String? targetUserId,
+    Machine? machine,
+    String? stepUpToken,
+  }) async {
+    if (machine != null) {
+      return submitMachineCheckIn(machine);
+    }
+    if (targetUserId != null && targetUserId.isNotEmpty) {
+      final user = UserModel(
+        id: targetUserId,
+        username: targetUserId,
+        email: '',
+      );
+      return submitTeamCheckIn(user);
+    }
+    return submitCheckIn();
+  }
+
   /// Submit Machine Attendance Transaction
   Future<bool> submitMachineCheckIn(Machine machine) async {
+    if (_selectedTaskId != null && _selectedTaskId!.isNotEmpty) {
+      return markTaskMusterAttendance(
+        taskId: _selectedTaskId!,
+        machine: machine,
+      );
+    }
+
     if (_isSubmitting) return false;
 
     if (_capturedLocation == null) {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to determine location. Please capture location.';
+      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -547,10 +750,19 @@ class AttendanceController extends ChangeNotifier {
       );
 
       _registerTeamAttendanceRecord(record);
+      if (machine.chassisNumber.isNotEmpty) {
+        _markedMachineAttendanceMap[machine.chassisNumber.trim().toLowerCase()] = record;
+      }
+      if (machine.machineChassisNo.isNotEmpty) {
+        _markedMachineAttendanceMap[machine.machineChassisNo.trim().toLowerCase()] = record;
+      }
       await AttendanceStorageService().saveRecord(record);
 
       if (_todayAttendance == null || _todayAttendance!.isMachineAttendance) {
         _todayAttendance = record;
+      }
+      if (!record.isSynced) {
+        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
       }
       _isSubmitting = false;
       notifyListeners();
@@ -569,15 +781,22 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
-  /// Submit Team Attendance Transaction (for self or team member)
+  /// Submit Team Attendance Transaction
   Future<bool> submitTeamCheckIn(UserModel targetMember) async {
+    if (_selectedTaskId != null && _selectedTaskId!.isNotEmpty) {
+      return markTaskMusterAttendance(
+        taskId: _selectedTaskId!,
+        targetUserId: targetMember.id,
+      );
+    }
+
     if (_isSubmitting) return false;
 
     if (_capturedLocation == null) {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to determine location. Please capture location.';
+      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -605,6 +824,9 @@ class AttendanceController extends ChangeNotifier {
       await AttendanceStorageService().saveRecord(record);
 
       _todayAttendance = record;
+      if (!record.isSynced) {
+        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+      }
       _isSubmitting = false;
       notifyListeners();
 
@@ -624,9 +846,14 @@ class AttendanceController extends ChangeNotifier {
 
   /// Submit Check-In Transaction
   Future<bool> submitCheckIn() async {
+    if (_selectedTaskId != null && _selectedTaskId!.isNotEmpty) {
+      return markTaskMusterAttendance(
+        taskId: _selectedTaskId!,
+      );
+    }
+
     if (_isSubmitting) return false;
 
-    // Allow re-checking in if status is NOT_CHECKED_IN or REJECTED
     if (_todayAttendance != null &&
         _todayAttendance!.status != 'NOT_CHECKED_IN' &&
         _todayAttendance!.status != 'REJECTED' &&
@@ -640,7 +867,7 @@ class AttendanceController extends ChangeNotifier {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to determine your location. Please capture location before submitting.';
+      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -667,10 +894,12 @@ class AttendanceController extends ChangeNotifier {
       await AttendanceStorageService().saveRecord(newAttendance);
 
       _todayAttendance = newAttendance;
+      if (!newAttendance.isSynced) {
+        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+      }
       _isSubmitting = false;
       notifyListeners();
 
-      // Refresh today's attendance, team members, history & pending approvals from server
       fetchTodayAttendance();
       fetchAuthorizedTeamMembers();
       fetchHistory();
@@ -702,7 +931,7 @@ class AttendanceController extends ChangeNotifier {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to determine your location. Please capture location before submitting.';
+      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -730,6 +959,9 @@ class AttendanceController extends ChangeNotifier {
       await AttendanceStorageService().saveRecord(updatedAttendance);
 
       _todayAttendance = updatedAttendance;
+      if (!updatedAttendance.isSynced) {
+        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+      }
       _isSubmitting = false;
       notifyListeners();
 
@@ -755,6 +987,9 @@ class AttendanceController extends ChangeNotifier {
 
     try {
       _history = await repository.getHistory(page: page, statusFilter: statusFilter);
+      for (final item in _history) {
+        _registerTeamAttendanceRecord(item);
+      }
       await _syncLocalTeamRecords();
       _isLoadingHistory = false;
       notifyListeners();
@@ -775,6 +1010,7 @@ class AttendanceController extends ChangeNotifier {
 
     try {
       _pendingApprovals = await repository.getPendingApprovals(page: page);
+      _pendingMusterApprovals = await repository.getPendingMusterApprovals();
       _isLoadingApprovals = false;
       notifyListeners();
     } catch (e) {
@@ -787,52 +1023,55 @@ class AttendanceController extends ChangeNotifier {
   }
 
   /// Manager Approves Attendance Record
-  Future<bool> approveAttendance(String attendanceId) async {
+  Future<bool> approveAttendance(String attendanceId, {String remarks = 'Attendance approved'}) async {
     _errorMessage = null;
     notifyListeners();
 
     try {
       final success = await repository.approveAttendance(attendanceId);
-      if (success) {
-        _pendingApprovals.removeWhere((item) => item.id == attendanceId);
-        final index = _history.indexWhere((item) => item.id == attendanceId);
-        if (index != -1) {
-          final old = _history[index];
-          final updated = AttendanceModel(
-            id: old.id,
-            userId: old.userId,
-            userName: old.userName,
-            employeeId: old.employeeId,
-            attendanceType: old.attendanceType,
-            markedForUserId: old.markedForUserId,
-            markedForUserName: old.markedForUserName,
-            markedByUserId: old.markedByUserId,
-            markedByUserName: old.markedByUserName,
-            reportingManagerId: old.reportingManagerId,
-            reportingManagerName: old.reportingManagerName,
-            status: 'APPROVED',
-            checkInTime: old.checkInTime,
-            checkOutTime: old.checkOutTime,
-            checkInLat: old.checkInLat,
-            checkInLng: old.checkInLng,
-            checkInAccuracy: old.checkInAccuracy,
-            checkInPhotoUrl: old.checkInPhotoUrl,
-            locationSource: old.locationSource,
-            approvalStatus: 'APPROVED',
-            machineChassisNo: old.machineChassisNo,
-            machineId: old.machineId,
-            createdAt: old.createdAt,
-          );
-          _registerTeamAttendanceRecord(updated);
-          await AttendanceStorageService().saveRecord(updated);
-        }
-        fetchTodayAttendance();
-        fetchAuthorizedTeamMembers();
-      } else {
-        _errorMessage = 'Unable to approve attendance. Please verify reporting manager permissions.';
+      if (!success) {
+        await repository.approveMuster(attendanceId, remarks: remarks);
       }
+
+      _pendingApprovals.removeWhere((item) => item.id == attendanceId);
+      _pendingMusterApprovals.removeWhere((m) => m.id == attendanceId);
+
+      final index = _history.indexWhere((item) => item.id == attendanceId);
+      if (index != -1) {
+        final old = _history[index];
+        final updated = AttendanceModel(
+          id: old.id,
+          userId: old.userId,
+          userName: old.userName,
+          employeeId: old.employeeId,
+          attendanceType: old.attendanceType,
+          markedForUserId: old.markedForUserId,
+          markedForUserName: old.markedForUserName,
+          markedByUserId: old.markedByUserId,
+          markedByUserName: old.markedByUserName,
+          reportingManagerId: old.reportingManagerId,
+          reportingManagerName: old.reportingManagerName,
+          status: 'APPROVED',
+          checkInTime: old.checkInTime,
+          checkOutTime: old.checkOutTime,
+          checkInLat: old.checkInLat,
+          checkInLng: old.checkInLng,
+          checkInAccuracy: old.checkInAccuracy,
+          checkInPhotoUrl: old.checkInPhotoUrl,
+          locationSource: old.locationSource,
+          approvalStatus: 'APPROVED',
+          machineChassisNo: old.machineChassisNo,
+          machineId: old.machineId,
+          createdAt: old.createdAt,
+        );
+        _registerTeamAttendanceRecord(updated);
+        await AttendanceStorageService().saveRecord(updated);
+      }
+      fetchTodayAttendance();
+      fetchAuthorizedTeamMembers();
+
       notifyListeners();
-      return success;
+      return true;
     } catch (e) {
       _errorMessage = e.toString().replaceAll('Exception: ', '');
       notifyListeners();
@@ -854,47 +1093,50 @@ class AttendanceController extends ChangeNotifier {
 
     try {
       final success = await repository.rejectAttendance(attendanceId, cleanReason);
-      if (success) {
-        _pendingApprovals.removeWhere((item) => item.id == attendanceId);
-        final index = _history.indexWhere((item) => item.id == attendanceId);
-        if (index != -1) {
-          final old = _history[index];
-          final updated = AttendanceModel(
-            id: old.id,
-            userId: old.userId,
-            userName: old.userName,
-            employeeId: old.employeeId,
-            attendanceType: old.attendanceType,
-            markedForUserId: old.markedForUserId,
-            markedForUserName: old.markedForUserName,
-            markedByUserId: old.markedByUserId,
-            markedByUserName: old.markedByUserName,
-            reportingManagerId: old.reportingManagerId,
-            reportingManagerName: old.reportingManagerName,
-            status: 'REJECTED',
-            checkInTime: old.checkInTime,
-            checkOutTime: old.checkOutTime,
-            checkInLat: old.checkInLat,
-            checkInLng: old.checkInLng,
-            checkInAccuracy: old.checkInAccuracy,
-            checkInPhotoUrl: old.checkInPhotoUrl,
-            locationSource: old.locationSource,
-            approvalStatus: 'REJECTED',
-            rejectionReason: cleanReason,
-            machineChassisNo: old.machineChassisNo,
-            machineId: old.machineId,
-            createdAt: old.createdAt,
-          );
-          _registerTeamAttendanceRecord(updated);
-          await AttendanceStorageService().saveRecord(updated);
-        }
-        fetchTodayAttendance();
-        fetchAuthorizedTeamMembers();
-      } else {
-        _errorMessage = 'Unable to reject attendance. Please verify reporting manager permissions.';
+      if (!success) {
+        await repository.rejectMuster(attendanceId, reason: cleanReason);
       }
+
+      _pendingApprovals.removeWhere((item) => item.id == attendanceId);
+      _pendingMusterApprovals.removeWhere((m) => m.id == attendanceId);
+
+      final index = _history.indexWhere((item) => item.id == attendanceId);
+      if (index != -1) {
+        final old = _history[index];
+        final updated = AttendanceModel(
+          id: old.id,
+          userId: old.userId,
+          userName: old.userName,
+          employeeId: old.employeeId,
+          attendanceType: old.attendanceType,
+          markedForUserId: old.markedForUserId,
+          markedForUserName: old.markedForUserName,
+          markedByUserId: old.markedByUserId,
+          markedByUserName: old.markedByUserName,
+          reportingManagerId: old.reportingManagerId,
+          reportingManagerName: old.reportingManagerName,
+          status: 'REJECTED',
+          checkInTime: old.checkInTime,
+          checkOutTime: old.checkOutTime,
+          checkInLat: old.checkInLat,
+          checkInLng: old.checkInLng,
+          checkInAccuracy: old.checkInAccuracy,
+          checkInPhotoUrl: old.checkInPhotoUrl,
+          locationSource: old.locationSource,
+          approvalStatus: 'REJECTED',
+          rejectionReason: cleanReason,
+          machineChassisNo: old.machineChassisNo,
+          machineId: old.machineId,
+          createdAt: old.createdAt,
+        );
+        _registerTeamAttendanceRecord(updated);
+        await AttendanceStorageService().saveRecord(updated);
+      }
+      fetchTodayAttendance();
+      fetchAuthorizedTeamMembers();
+
       notifyListeners();
-      return success;
+      return true;
     } catch (e) {
       _errorMessage = e.toString().replaceAll('Exception: ', '');
       notifyListeners();

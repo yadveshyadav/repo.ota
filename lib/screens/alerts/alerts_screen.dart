@@ -93,6 +93,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         route == 'Offline' ||
         route == 'Maintenance') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.machines);
+    } else if (route == 'Machine Shifting' || route == 'Machine Transfers' || route == 'Transfers' || route == 'Shifting') {
+      Navigator.of(context).pushReplacementNamed(AppRoutes.machineTransfers);
     } else if (route == 'Live Tracking' || route == 'Live Status' || route == 'Map View') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.liveStatus);
     } else if (route == 'My Tasks' || route == 'Tasks') {

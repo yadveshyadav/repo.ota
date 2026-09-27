@@ -119,7 +119,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
   Future<void> _pickAttachment(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(source: source, imageQuality: 85);
+      final picked = await picker.pickImage(
+        source: source,
+        imageQuality: 65,
+        maxWidth: 1024,
+        maxHeight: 1024,
+      );
       if (picked != null) {
         setState(() {
           _attachmentFile = picked;

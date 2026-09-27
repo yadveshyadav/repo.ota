@@ -50,6 +50,12 @@ class _AttendanceCaptureScreenState extends State<AttendanceCaptureScreen> {
     widget.controller.resetCaptureState();
     widget.controller.setUseTestLocation(false);
     _refreshLocation();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.controller.capturedPhotoBytes == null) {
+        _handleCameraCapture();
+      }
+    });
   }
 
   Future<void> _refreshLocation() async {

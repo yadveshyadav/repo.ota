@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../../core/constants/app_constants.dart';
 import '../../features/auth/models/user_model.dart';
 import 'api_client.dart';
 
@@ -7,7 +8,7 @@ class AuthApiService {
   final ApiClient apiClient;
 
   AuthApiService({ApiClient? apiClient})
-      : apiClient = apiClient ?? ApiClient();
+      : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.defaultBaseUrl);
 
   /// Execute login request to POST /api/v1/auth/login/
   Future<Map<String, dynamic>> login({
@@ -37,7 +38,7 @@ class AuthApiService {
     }
 
     try {
-      final response = await apiClient.post(primaryEndpoint, body: body);
+      final response = await apiClient.post(primaryEndpoint, body: body, isPublic: true);
       if (response is Map<String, dynamic>) {
         return response;
       }
@@ -46,7 +47,7 @@ class AuthApiService {
         print('[AuthApiService] Primary login endpoint failed ($e), trying secondary...');
       }
       try {
-        final response = await apiClient.post(secondaryEndpoint, body: body);
+        final response = await apiClient.post(secondaryEndpoint, body: body, isPublic: true);
         if (response is Map<String, dynamic>) {
           return response;
         }

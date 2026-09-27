@@ -1,8 +1,8 @@
-/// Application-wide string constants and metadata for HERO APP.
+                    /// Application-wide string constants and metadata for HERO APP.
 abstract class AppConstants {
   static const String appName = 'HERO APP';
-  static const String appPackage = 'com.infocrats.hero';
-  static const String appVersion = '1.0.0';
+  static const String appPackage = 'com.infocrats.heroapp';
+  static const String appVersion = '1.0.4';
 
   // Branding Taglines
   static const String taglineLine1 = 'Smart Operations.';
@@ -35,6 +35,7 @@ abstract class AppConstants {
   // Base URLs & API Endpoints
   //static const String defaultBaseUrl = 'https://27qxnvkh-3000.inc1.devtunnels.ms';
   static const String defaultBaseUrl = 'https://hero.pramaanu.co.in';
+  static const String attendanceBaseUrl = 'https://hero.pramaanu.co.in';
   static const String machinesEndpoint = '/api/v1/machines/';
   static const String machinesFallbackEndpoint = 'https://hero.pramaanu.co.in/api/v1/machines/';
   static const String vendorsEndpoint = '/api/v1/integrations/vendors/';

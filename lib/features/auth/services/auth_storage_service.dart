@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../services/attendance_storage_service.dart';
 import '../models/auth_token.dart';
 import '../models/user_model.dart';
 
@@ -185,6 +186,8 @@ class AuthStorageService {
     _lastActiveAt = null;
     _isLoggedIn = false;
     _isInitialized = false;
+
+    await AttendanceStorageService().clearAllRecords();
 
     try {
       final prefs = await SharedPreferences.getInstance();

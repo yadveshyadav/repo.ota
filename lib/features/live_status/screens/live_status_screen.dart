@@ -75,6 +75,8 @@ class _LiveStatusScreenState extends State<LiveStatusScreen> {
         route == 'Offline' ||
         route == 'Maintenance') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.machines);
+    } else if (route == 'Machine Shifting' || route == 'Machine Transfers' || route == 'Transfers' || route == 'Shifting') {
+      Navigator.of(context).pushReplacementNamed(AppRoutes.machineTransfers);
     } else if (route == 'Live Tracking' || route == 'Live Status' || route == 'Map View') {
       // Already on Live Status screen
     } else if (route == 'My Tasks' || route == 'Tasks') {

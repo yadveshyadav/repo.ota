@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:hero_app/models/task_execution_model.dart';
 import 'package:hero_app/models/task_filter.dart';
 import 'package:hero_app/models/task_master_snapshots.dart';
@@ -27,9 +26,6 @@ abstract class TaskRepository {
 /// Production ApiTaskRepository consuming ILYNC & HERO Tasks API
 class ApiTaskRepository implements TaskRepository {
   final TaskApiService apiService;
-  final Map<String, TaskModel> _taskDetailsCache = {};
-  final Map<String, TaskExecutionModel?> _executionCache = {};
-  Map<String, int>? _typeCountsCache;
 
   ApiTaskRepository({ApiClient? apiClient, TaskApiService? apiService})
       : apiService = apiService ??
@@ -42,88 +38,39 @@ class ApiTaskRepository implements TaskRepository {
     TaskFilterModel? filters,
     String search = '',
   }) async {
-    try {
-      final response = await apiService
-          .fetchTasks(
-            page: page,
-            size: size,
-            filters: filters,
-            search: search,
-          )
-          .timeout(const Duration(seconds: 12));
-
-      if (response.summaryCounts.isEmpty) {
-        final counts = await getTaskTypeCounts();
-        if (counts.isNotEmpty) {
-          return TaskResponse(
-            tasks: response.tasks,
-            totalCount: response.totalCount,
-            totalPages: response.totalPages,
-            currentPage: response.currentPage,
-            pageSize: response.pageSize,
-            hasNext: response.hasNext,
-            hasPrevious: response.hasPrevious,
-            summaryCounts: counts,
-          );
-        }
-      }
-
-      return response;
-    } catch (e) {
-      if (kDebugMode) {
-        print('[ApiTaskRepository] Error fetching tasks from API: $e');
-      }
-      rethrow;
-    }
+    // Task API stopped for now as requested. Returning empty response without fake data.
+    return TaskResponse(
+      tasks: const [],
+      totalCount: 0,
+      totalPages: 1,
+      currentPage: page,
+      pageSize: size,
+      hasNext: false,
+      hasPrevious: false,
+      summaryCounts: const {},
+    );
   }
 
   @override
   Future<Map<String, int>> getTaskTypeCounts() async {
-    if (_typeCountsCache != null && _typeCountsCache!.isNotEmpty) {
-      return _typeCountsCache!;
-    }
-    try {
-      final counts = await apiService.fetchTaskTypeCounts();
-      if (counts.isNotEmpty) {
-        int totalSum = 0;
-        counts.forEach((_, v) => totalSum += v);
-        if (!counts.containsKey('ALL')) {
-          counts['ALL'] = totalSum;
-        }
-        _typeCountsCache = counts;
-        return counts;
-      }
-    } catch (_) {}
-
-    return MockTaskRepository().getTaskTypeCountsSync();
+    return const {};
   }
 
   @override
   Future<TaskModel> getTaskDetails(String taskId, {bool forceRefresh = false}) async {
-    if (!forceRefresh && _taskDetailsCache.containsKey(taskId)) {
-      return _taskDetailsCache[taskId]!;
-    }
-    try {
-      final task = await apiService.fetchTaskDetails(taskId);
-      _taskDetailsCache[taskId] = task;
-      return task;
-    } catch (_) {
-      return MockTaskRepository().getTaskDetails(taskId, forceRefresh: forceRefresh);
-    }
+    return const TaskModel(
+      id: '',
+      taskCode: '',
+      displayName: 'No Task Details',
+      taskType: 'GENERAL',
+      status: 'NOT_FOUND',
+      approvalStatus: 'NONE',
+    );
   }
 
   @override
   Future<TaskExecutionModel?> getTaskExecutionDetails(String taskId, {bool forceRefresh = false}) async {
-    if (!forceRefresh && _executionCache.containsKey(taskId)) {
-      return _executionCache[taskId];
-    }
-    try {
-      final exec = await apiService.fetchTaskExecutionDetails(taskId);
-      _executionCache[taskId] = exec;
-      return exec;
-    } catch (_) {
-      return MockTaskRepository().getTaskExecutionDetails(taskId, forceRefresh: forceRefresh);
-    }
+    return null;
   }
 }
 

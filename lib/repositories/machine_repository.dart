@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
+import '../features/auth/services/auth_storage_service.dart';
 import '../models/machine.dart';
 import '../models/machine_response.dart';
 import '../services/api/api_client.dart';
+import '../services/api/attendance_api_service.dart';
 import '../services/api/machine_api_service.dart';
 
 /// Abstract Machine Repository interface
@@ -19,21 +21,45 @@ abstract class MachineRepository {
 /// Production ApiMachineRepository fetching from Hero / Fiberforce API
 class ApiMachineRepository implements MachineRepository {
   final MachineApiService apiService;
+  final AttendanceApiService _attendanceApiService;
 
-  ApiMachineRepository({ApiClient? apiClient, MachineApiService? apiService})
-      : apiService = apiService ??
-            MachineApiService(apiClient: apiClient ?? ApiClient());
+  ApiMachineRepository({
+    ApiClient? apiClient,
+    MachineApiService? apiService,
+    AttendanceApiService? attendanceApiService,
+  })  : apiService = apiService ??
+            MachineApiService(apiClient: apiClient ?? ApiClient()),
+        _attendanceApiService = attendanceApiService ??
+            AttendanceApiService(apiClient: apiClient ?? ApiClient());
 
   @override
   Future<MachineResponse> getMachines() async {
     try {
-      final response = await apiService.fetchMachines();
-      return response;
+      final user = AuthStorageService().currentUser;
+
+      if (user == null || user.isAdmin) {
+        return await apiService.fetchMachines();
+      }
+
+      final results = await Future.wait([
+        apiService.fetchMachines(),
+        _attendanceApiService.fetchMyAssignedMachines().catchError((_) => <Machine>[]),
+      ]);
+
+      final response = results[0] as MachineResponse;
+      final assignedMachines = results[1] as List<Machine>;
+
+      return response.filteredForUser(user, assignedList: assignedMachines);
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiMachineRepository] Error fetching machines from API ($e), falling back to mock dataset.');
+        print('[ApiMachineRepository] Error fetching machines from API ($e)');
       }
-      return MockMachineRepository().getMachines();
+      return const MachineResponse(
+        success: false,
+        machines: [],
+        total: 0,
+        statusCounts: {},
+      );
     }
   }
 
@@ -82,9 +108,49 @@ class ApiMachineRepository implements MachineRepository {
   }
 }
 
-/// Mock implementation containing the exact 25 fleet machines matching the live backend API
+/// Mock implementation containing the exact fleet machines matching the live backend API
 class MockMachineRepository implements MachineRepository {
   static const List<Machine> _allMachines = [
+    Machine(
+      machineChassisNo: '89384938983498594',
+      engineNo: 'ENG-893849',
+      modelCode: 'test-hdd-11',
+      modelName: 'test-hdd-11',
+      siteId: 1,
+      siteName: 'Primary Site',
+      isCommissioned: true,
+      fuelCard: {'id': 1, 'name': 'Indian Oil', 'card_number': '7125021301570140'},
+      operatorInfo: {'name': 'TEST VENDOR'},
+      vendorName: 'TEST PARTNER',
+      status: 'IDLE',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 50.0,
+      runtimeStr: '04h 20m',
+      engineHours: 150,
+      latitude: 28.413722,
+      longitude: 77.042495,
+    ),
+    Machine(
+      machineChassisNo: '945758458478547',
+      engineNo: 'ENG-945758',
+      modelCode: 'hhd2',
+      modelName: 'hhd2 (hjhjhj)',
+      siteId: 1,
+      siteName: 'Primary Site',
+      isCommissioned: true,
+      fuelCard: {'id': 2, 'name': 'Indian Oil', 'card_number': '7125021301570141'},
+      operatorInfo: {'name': 'TEST VENDOR'},
+      vendorName: 'TEST PARTNER',
+      status: 'IDLE',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 40.0,
+      runtimeStr: '02h 10m',
+      engineHours: 85,
+      latitude: 28.413722,
+      longitude: 77.042495,
+    ),
     Machine(
       machineChassisNo: '600202608396',
       engineNo: 'TPHM106451',
@@ -559,7 +625,7 @@ class MockMachineRepository implements MachineRepository {
       modelName: 'APOLLO A600 V2',
       siteId: 16,
       siteName: 'SIHMA-BOQ HDD Site',
-      isCommissioned: false,
+      isCommissioned: true,
       operatorInfo: null,
       vendorName: 'Shree Shyam Enterprise',
       status: 'RUNNING',
@@ -571,25 +637,170 @@ class MockMachineRepository implements MachineRepository {
       latitude: 28.4595,
       longitude: 77.0266,
     ),
+    Machine(
+      machineChassisNo: '600202608412',
+      engineNo: 'TPHM108812',
+      modelCode: 'A600',
+      modelName: 'APOLLO A600 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'IDLE',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 42.0,
+      runtimeStr: '04h 12m',
+      engineHours: 110,
+      latitude: 27.7401,
+      longitude: 74.6500,
+    ),
+    Machine(
+      machineChassisNo: '600202608413',
+      engineNo: 'TPHM108813',
+      modelCode: 'A600',
+      modelName: 'APOLLO A600 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'IDLE',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 65.0,
+      runtimeStr: '02h 45m',
+      engineHours: 95,
+      latitude: 27.7420,
+      longitude: 74.6520,
+    ),
+    Machine(
+      machineChassisNo: '600202608414',
+      engineNo: '',
+      modelCode: 'A600',
+      modelName: 'APOLLO A600 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'RUNNING',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.working,
+      fuelLevelPercent: 50.0,
+      runtimeStr: '05h 20m',
+      engineHours: 210,
+      latitude: 27.7450,
+      longitude: 74.6550,
+    ),
+    Machine(
+      machineChassisNo: '600202608415',
+      engineNo: '',
+      modelCode: 'A600',
+      modelName: 'APOLLO A600 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'IDLE',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 30.0,
+      runtimeStr: '01h 15m',
+      engineHours: 45,
+      latitude: 27.7470,
+      longitude: 74.6570,
+    ),
+    Machine(
+      machineChassisNo: '600202608416',
+      engineNo: '',
+      modelCode: 'A600',
+      modelName: 'APOLLO A600 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'OFFLINE',
+      connectivity: ConnectivityState.offline,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 12.0,
+      runtimeStr: '00h 00m',
+      engineHours: 0,
+      latitude: 27.7490,
+      longitude: 74.6590,
+    ),
+    Machine(
+      machineChassisNo: '800202607591',
+      engineNo: 'STHM129221',
+      modelCode: 'A800',
+      modelName: 'APOLLO A800 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'IDLE',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 48.0,
+      runtimeStr: '03h 30m',
+      engineHours: 180,
+      latitude: 22.5730,
+      longitude: 75.5940,
+    ),
+    Machine(
+      machineChassisNo: '800202607592',
+      engineNo: 'STHM129222',
+      modelCode: 'A800',
+      modelName: 'APOLLO A800 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: true,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'RUNNING',
+      connectivity: ConnectivityState.live,
+      operationalState: OperationalState.working,
+      fuelLevelPercent: 70.0,
+      runtimeStr: '06h 10m',
+      engineHours: 320,
+      latitude: 22.5750,
+      longitude: 75.5960,
+    ),
+    Machine(
+      machineChassisNo: '800202607593',
+      engineNo: '',
+      modelCode: 'A800',
+      modelName: 'APOLLO A800 V2',
+      siteId: 16,
+      siteName: 'Sujangarh-SITE',
+      isCommissioned: false,
+      vendorName: 'HERO INFRASTRUCTURE',
+      status: 'OFFLINE',
+      connectivity: ConnectivityState.offline,
+      operationalState: OperationalState.idle,
+      fuelLevelPercent: 5.0,
+      runtimeStr: '00h 00m',
+      engineHours: 0,
+      latitude: 22.5770,
+      longitude: 75.5980,
+    ),
   ];
 
   @override
   Future<MachineResponse> getMachines() async {
     await Future.delayed(const Duration(milliseconds: 200));
-    return MachineResponse(
+    final user = AuthStorageService().currentUser;
+    final fullResp = MachineResponse(
       success: true,
       machines: _allMachines,
       total: _allMachines.length,
       statusCounts: const {
-        'ALL': 25,
-        'RUNNING': 5,
-        'IDLE': 15,
+        'ALL': 33,
+        'COMMISSIONED': 18,
+        'RUNNING': 8,
+        'IDLE': 16,
         'MAINTENANCE': 3,
-        'BREAKDOWN': 0,
-        'OFFLINE': 2,
-        'COMMISSIONED': 7,
+        'OFFLINE': 6,
       },
     );
+    return fullResp.filteredForUser(user);
   }
 
   @override

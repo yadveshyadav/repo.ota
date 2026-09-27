@@ -129,6 +129,10 @@ class ApiAuthRepository implements AuthRepository {
     } catch (e) {
       final errStr = e.toString().toLowerCase();
 
+      if (errStr.contains('timeout') || errStr.contains('connection') || errStr.contains('network') || errStr.contains('socket')) {
+        throw Exception('Server connection timed out. Please check your internet connection and try again.');
+      }
+
       // If the server explicitly rejected the credentials
       if (errStr.contains('400') ||
           errStr.contains('401') ||
@@ -183,7 +187,6 @@ class ApiAuthRepository implements AuthRepository {
     final cached = storageService.currentUser;
     if (cached != null) {
       AuthorizationService.instance.initialize(user: cached);
-      return cached;
     }
     if (storageService.isLoggedIn && storageService.accessToken != null) {
       apiClient.setAuthToken(storageService.accessToken!);
@@ -196,7 +199,7 @@ class ApiAuthRepository implements AuthRepository {
         }
       } catch (_) {}
     }
-    return null;
+    return cached;
   }
 
   @override

@@ -1,19 +1,20 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import '../../features/auth/models/user_model.dart';
 import '../../features/auth/services/auth_storage_service.dart';
 import '../../models/attendance_model.dart';
 import '../../models/machine.dart';
+import '../../models/muster_model.dart';
+import '../../core/constants/app_constants.dart';
 import '../attendance_storage_service.dart';
 import 'api_client.dart';
 
-/// Dedicated API Service for Employee Attendance transactions, Machine Attendance, Team Attendance, and Manager Approvals
+/// Dedicated Netinfra Task Service API Service for DailyMuster and Attendance transactions
 class AttendanceApiService {
   final ApiClient apiClient;
 
   AttendanceApiService({ApiClient? apiClient})
-      : apiClient = apiClient ?? ApiClient();
+      : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.defaultBaseUrl);
 
   /// Cleanly extract user ID string without modifying alphanumeric characters or ObjectIds
   String _getCleanUserId(UserModel? user) {
@@ -30,6 +31,346 @@ class AttendanceApiService {
     final encoded = base64Encode(photoBytes);
     return 'data:image/jpeg;base64,$encoded';
   }
+
+  // ============================================================================
+  // DOCUMENTED NETINFRA MUSTER API ENDPOINTS
+  // ============================================================================
+
+  /// A. CHECK TODAY'S MUSTER: GET /api/tasks/{taskId}/musters/today
+  Future<DailyMuster?> getTodaysMuster(String taskId) async {
+    final cleanTaskId = taskId.trim();
+    if (cleanTaskId.isEmpty) return null;
+
+    final primaryEndpoint = '/api/tasks/$cleanTaskId/musters/today';
+    final fallbackEndpoint = '/api/v1/tasks/$cleanTaskId/musters/today';
+
+    try {
+      final response = await apiClient.get(primaryEndpoint);
+      if (response != null) {
+        return _parseDailyMuster(response);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceApiService] Primary getTodaysMuster failed ($e), trying fallback...');
+      }
+      try {
+        final response = await apiClient.get(fallbackEndpoint);
+        if (response != null) {
+          return _parseDailyMuster(response);
+        }
+      } catch (e2) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] Fallback getTodaysMuster failed: $e2');
+        }
+      }
+    }
+    return null;
+  }
+
+  /// B. CREATE MUSTER: POST /api/tasks/{taskId}/musters
+  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body) async {
+    final cleanTaskId = taskId.trim();
+    final primaryEndpoint = '/api/tasks/$cleanTaskId/musters';
+    final fallbackEndpoint = '/api/v1/tasks/$cleanTaskId/musters';
+
+    dynamic response;
+    try {
+      response = await apiClient.post(primaryEndpoint, body: body);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceApiService] Primary createMuster failed ($e), trying fallback...');
+      }
+      response = await apiClient.post(fallbackEndpoint, body: body);
+    }
+
+    final parsed = _parseDailyMuster(response);
+    if (parsed != null) return parsed;
+    throw Exception('Failed to parse created muster response.');
+  }
+
+  /// C. GET MUSTER DETAIL: GET /api/musters/{musterId}
+  Future<DailyMuster> getMusterDetail(String musterId) async {
+    final cleanMusterId = musterId.trim();
+    final primaryEndpoint = '/api/musters/$cleanMusterId';
+    final fallbackEndpoint = '/api/v1/musters/$cleanMusterId';
+
+    dynamic response;
+    try {
+      response = await apiClient.get(primaryEndpoint);
+    } catch (e) {
+      response = await apiClient.get(fallbackEndpoint);
+    }
+
+    final parsed = _parseDailyMuster(response);
+    if (parsed != null) return parsed;
+    throw Exception('Failed to fetch muster detail for $musterId');
+  }
+
+  /// D. UPDATE/SAVE MUSTER: PUT /api/musters/{musterId}
+  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body) async {
+    final cleanMusterId = musterId.trim();
+    final primaryEndpoint = '/api/musters/$cleanMusterId';
+    final fallbackEndpoint = '/api/v1/musters/$cleanMusterId';
+
+    dynamic response;
+    try {
+      response = await apiClient.put(primaryEndpoint, body: body);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceApiService] Primary updateMuster failed ($e), trying fallback...');
+      }
+      response = await apiClient.put(fallbackEndpoint, body: body);
+    }
+
+    final parsed = _parseDailyMuster(response);
+    if (parsed != null) return parsed;
+    throw Exception('Failed to parse updated muster response.');
+  }
+
+  /// E. SUBMIT MUSTER: POST /api/musters/{musterId}/submit
+  Future<bool> submitMuster(String musterId, {String? stepUpToken}) async {
+    final cleanMusterId = musterId.trim();
+    final effectiveToken = (stepUpToken != null && stepUpToken.isNotEmpty)
+        ? stepUpToken
+        : (apiClient.authToken != null && apiClient.authToken!.isNotEmpty
+            ? apiClient.authToken!
+            : 'stepup_default');
+
+    final primaryEndpoint = '/api/musters/$cleanMusterId/submit?stepUpToken=${Uri.encodeComponent(effectiveToken)}';
+    final fallbackEndpoint = '/api/v1/musters/$cleanMusterId/submit?stepUpToken=${Uri.encodeComponent(effectiveToken)}';
+
+    final body = <String, dynamic>{
+      'stepUpToken': effectiveToken,
+    };
+
+    try {
+      await apiClient.post(primaryEndpoint, body: body);
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[AttendanceApiService] Primary submitMuster failed ($e), trying fallback...');
+      }
+      try {
+        await apiClient.post(fallbackEndpoint, body: body);
+        return true;
+      } catch (e2) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] Fallback submitMuster failed: $e2');
+        }
+        rethrow;
+      }
+    }
+  }
+
+  /// F. GET PENDING APPROVALS: GET /api/musters/pending-approval
+  Future<List<DailyMuster>> getPendingMusterApprovals() async {
+    const primaryEndpoint = '/api/musters/pending-approval';
+    const fallbackEndpoint = '/api/v1/musters/pending-approval';
+
+    try {
+      final response = await apiClient.get(primaryEndpoint);
+      return _parseDailyMusterList(response);
+    } catch (_) {
+      try {
+        final response = await apiClient.get(fallbackEndpoint);
+        return _parseDailyMusterList(response);
+      } catch (e) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] getPendingMusterApprovals error: $e');
+        }
+        return [];
+      }
+    }
+  }
+
+  /// G. APPROVE MUSTER: POST /api/musters/{musterId}/approve
+  Future<bool> approveMuster(String musterId, {String remarks = 'Attendance approved'}) async {
+    final cleanMusterId = musterId.trim();
+    final primaryEndpoint = '/api/musters/$cleanMusterId/approve';
+    final fallbackEndpoint = '/api/v1/musters/$cleanMusterId/approve';
+
+    final body = {'remarks': remarks};
+
+    try {
+      await apiClient.post(primaryEndpoint, body: body);
+      return true;
+    } catch (_) {
+      try {
+        await apiClient.post(fallbackEndpoint, body: body);
+        return true;
+      } catch (e) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] approveMuster error: $e');
+        }
+        return false;
+      }
+    }
+  }
+
+  /// APPROVE ATTENDANCE: POST /api/v1/attendance/{attendanceId}/approve/
+  Future<bool> approveAttendance(String attendanceId) async {
+    final cleanId = attendanceId.trim();
+    final primaryEndpoint = '/api/v1/attendance/$cleanId/approve/';
+    final secondaryEndpoint = '/api/v1/attendance/$cleanId/approve';
+
+    try {
+      await apiClient.post(primaryEndpoint, body: {});
+      return true;
+    } catch (_) {
+      try {
+        await apiClient.post(secondaryEndpoint, body: {});
+        return true;
+      } catch (e) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] approveAttendance error: $e');
+        }
+        return false;
+      }
+    }
+  }
+
+  /// REJECT ATTENDANCE: POST /api/v1/attendance/{attendanceId}/reject/
+  Future<bool> rejectAttendance(String attendanceId, String reason) async {
+    final cleanId = attendanceId.trim();
+    final cleanReason = reason.trim();
+    final primaryEndpoint = '/api/v1/attendance/$cleanId/reject/';
+    final secondaryEndpoint = '/api/v1/attendance/$cleanId/reject';
+
+    final body = {'rejection_reason': cleanReason, 'reason': cleanReason};
+
+    try {
+      await apiClient.post(primaryEndpoint, body: body);
+      return true;
+    } catch (_) {
+      try {
+        await apiClient.post(secondaryEndpoint, body: body);
+        return true;
+      } catch (e) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] rejectAttendance error: $e');
+        }
+        return false;
+      }
+    }
+  }
+
+  /// I. GET MUSTER HISTORY: GET /api/tasks/{taskId}/musters
+  Future<List<DailyMuster>> getMusterHistoryForTask(String taskId) async {
+    final cleanTaskId = taskId.trim();
+    final primaryEndpoint = '/api/tasks/$cleanTaskId/musters';
+    final fallbackEndpoint = '/api/v1/tasks/$cleanTaskId/musters';
+
+    try {
+      final response = await apiClient.get(primaryEndpoint);
+      return _parseDailyMusterList(response);
+    } catch (_) {
+      try {
+        final response = await apiClient.get(fallbackEndpoint);
+        return _parseDailyMusterList(response);
+      } catch (e) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] getMusterHistoryForTask error: $e');
+        }
+        return [];
+      }
+    }
+  }
+
+  /// J. GET GENERAL MUSTER LIST: GET /api/musters
+  Future<List<DailyMuster>> getGeneralMusterList() async {
+    const primaryEndpoint = '/api/musters';
+    const fallbackEndpoint = '/api/v1/musters';
+
+    try {
+      final response = await apiClient.get(primaryEndpoint);
+      return _parseDailyMusterList(response);
+    } catch (_) {
+      try {
+        final response = await apiClient.get(fallbackEndpoint);
+        return _parseDailyMusterList(response);
+      } catch (e) {
+        if (kDebugMode) {
+          print('[AttendanceApiService] getGeneralMusterList error: $e');
+        }
+        return [];
+      }
+    }
+  }
+
+  /// K. GET PHOTO UPLOAD URL: GET /api/musters/photo-upload-url
+  Future<PhotoUploadUrlResponse> getPhotoUploadUrl({
+    required String musterId,
+    required String entryId,
+    String contentType = 'image/jpeg',
+  }) async {
+    final queryParams = 'musterId=${Uri.encodeComponent(musterId)}&entryId=${Uri.encodeComponent(entryId)}&contentType=${Uri.encodeComponent(contentType)}';
+    final primaryEndpoint = '/api/musters/photo-upload-url?$queryParams';
+    final fallbackEndpoint = '/api/v1/musters/photo-upload-url?$queryParams';
+
+    dynamic response;
+    try {
+      response = await apiClient.get(primaryEndpoint);
+    } catch (_) {
+      response = await apiClient.get(fallbackEndpoint);
+    }
+
+    if (response is Map<String, dynamic>) {
+      return PhotoUploadUrlResponse.fromJson(response);
+    }
+    throw Exception('Invalid photo upload URL response received.');
+  }
+
+  /// L. UPLOAD ACTUAL RAW JPEG IMAGE TO PRESIGNED URL
+  Future<bool> uploadAttendancePhoto({
+    required String uploadUrl,
+    required List<int> imageBytes,
+    String contentType = 'image/jpeg',
+  }) async {
+    if (uploadUrl.isEmpty || imageBytes.isEmpty) {
+      throw Exception('Upload URL and image bytes are required.');
+    }
+
+    final response = await apiClient.putRawBytes(
+      uploadUrl,
+      imageBytes,
+      contentType: contentType,
+    );
+
+    return response.statusCode >= 200 && response.statusCode < 300;
+  }
+
+  /// M. GET PHOTO VIEW URL: GET /api/musters/photo-url
+  Future<String> getPhotoUrl({
+    required String musterId,
+    required String photoKey,
+  }) async {
+    if (photoKey.isEmpty) return '';
+
+    final queryParams = 'musterId=${Uri.encodeComponent(musterId)}&photoKey=${Uri.encodeComponent(photoKey)}';
+    final primaryEndpoint = '/api/musters/photo-url?$queryParams';
+    final fallbackEndpoint = '/api/v1/musters/photo-url?$queryParams';
+
+    dynamic response;
+    try {
+      response = await apiClient.get(primaryEndpoint);
+    } catch (_) {
+      try {
+        response = await apiClient.get(fallbackEndpoint);
+      } catch (_) {}
+    }
+
+    if (response is Map<String, dynamic>) {
+      final photoResp = PhotoViewResponse.fromJson(response);
+      if (photoResp.photoUrl.isNotEmpty) {
+        return photoResp.photoUrl;
+      }
+    }
+    return '';
+  }
+
+  // ============================================================================
+  // LEGACY/COMPATIBILITY ENDPOINTS FOR EXISTING UI
+  // ============================================================================
 
   Future<AttendanceModel> _ensurePhotoUrl(
     AttendanceModel model,
@@ -93,7 +434,7 @@ class AttendanceApiService {
     );
   }
 
-  /// Fetch today's active attendance record for the authenticated user from GET /api/v1/attendance/today/
+  /// Fetch today's active attendance record for the authenticated user
   Future<AttendanceModel?> fetchTodayAttendance() async {
     const primaryEndpoint = '/api/v1/attendance/today/';
     const secondaryEndpoint = '/api/v1/attendance/today';
@@ -151,44 +492,33 @@ class AttendanceApiService {
     return null;
   }
 
-  /// Fetch machines assigned to the currently authenticated user from GET /api/v1/attendance/my-assigned-machines/
+  /// Fetch machines assigned to the currently authenticated user
   Future<List<Machine>> fetchMyAssignedMachines({String? date}) async {
     final todayStr = date ?? '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
-    final teamEndpoint = '/api/v1/attendance/team-attendance/?date=$todayStr';
-    const primaryEndpoint = '/api/v1/attendance/my-assigned-machines/';
-    const secondaryEndpoint = '/api/v1/machines/assigned/';
-    const tertiaryEndpoint = '/api/v1/machines/';
+    final endpoints = [
+      '/api/v1/attendance/my-assigned-machines/',
+      '/api/v1/attendance/team-attendance/?date=$todayStr',
+      '/api/v1/machines/assigned/',
+      '/api/v1/machines/',
+      '/api/musters/machines',
+    ];
 
-    try {
-      final response = await apiClient.get(teamEndpoint);
-      final machines = _parseMachineList(response);
-      if (machines.isNotEmpty) return machines;
-    } catch (_) {}
-
-    try {
-      final response = await apiClient.get(primaryEndpoint);
-      final machines = _parseMachineList(response);
-      if (machines.isNotEmpty) return machines;
-    } catch (_) {}
-
-    try {
-      final response = await apiClient.get(secondaryEndpoint);
-      final machines = _parseMachineList(response);
-      if (machines.isNotEmpty) return machines;
-    } catch (_) {}
-
-    try {
-      final response = await apiClient.get(tertiaryEndpoint);
-      return _parseMachineList(response);
-    } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Fetch assigned machines error: $e');
-      }
-      return [];
+    for (final ep in endpoints) {
+      try {
+        final response = await apiClient.get(ep);
+        final machines = _parseMachineList(response);
+        if (machines.isNotEmpty) {
+          if (kDebugMode) {
+            print('[AttendanceApiService] Fetched ${machines.length} assigned machines from $ep');
+          }
+          return machines;
+        }
+      } catch (_) {}
     }
+    return [];
   }
 
-  /// Fetch authorized team members for supervisor from GET /api/v1/attendance/team-attendance/
+  /// Fetch authorized team members for supervisor
   Future<List<UserModel>> fetchAuthorizedTeamMembers({String? date}) async {
     final todayStr = date ?? '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
     final primaryEndpoint = '/api/v1/attendance/team-attendance/?date=$todayStr';
@@ -218,7 +548,7 @@ class AttendanceApiService {
     }
   }
 
-  /// Submit Machine Attendance transaction via POST /api/v1/attendance/machine-check-in/
+  /// Submit Machine Attendance transaction
   Future<AttendanceModel> checkInMachine({
     required String machineChassisNo,
     required String? assignmentId,
@@ -238,9 +568,10 @@ class AttendanceApiService {
 
     final mChassis = machineChassisNo.isNotEmpty ? machineChassisNo : 'N/A';
     final mId = (assignmentId != null && assignmentId.isNotEmpty) ? assignmentId : mChassis;
+    dynamic parsedUserId = int.tryParse(userIdStr) ?? userIdStr;
 
     final jsonBody = <String, dynamic>{
-      'user_id': userIdStr,
+      'user_id': parsedUserId,
       'machine_id': mId,
       'machine_chassis_no': mChassis,
       'latitude': latitude,
@@ -248,53 +579,15 @@ class AttendanceApiService {
       'accuracy': accuracy,
       'location_source': locationSource,
       'attendance_type': 'MACHINE',
-      'check_in_photo_base64': photoBase64,
       'check_in_photo': photoBase64,
-      'photo_base64': photoBase64,
-      'photo': photoBase64,
-      'image': photoBase64,
     };
 
-    if (kDebugMode) {
-      print('[AttendanceApiService] MACHINE CHECK-IN STARTED for machine_id: $mId, chassis: $mChassis, user_id: $userIdStr');
-    }
-
     dynamic response;
-
-    // 1. Primary JSON POST
     try {
       response = await apiClient.post(primaryEndpoint, body: jsonBody);
     } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Primary JSON machine check-in failed ($e), trying fallback...');
-      }
       try {
         response = await apiClient.post(fallbackEndpoint, body: jsonBody);
-      } catch (_) {}
-    }
-
-    // 2. Fallback to Multipart Upload
-    if (response == null && photoBytes != null && photoBytes.isNotEmpty) {
-      try {
-        final filename = photoFilename ?? 'check_in_photo.jpg';
-        final fields = <String, String>{
-          'user_id': userIdStr,
-          'machine_id': mId,
-          'machine_chassis_no': mChassis,
-          'latitude': latitude.toString(),
-          'longitude': longitude.toString(),
-          'accuracy': accuracy.toString(),
-          'location_source': locationSource,
-          'attendance_type': 'MACHINE',
-          'check_in_photo_base64': photoBase64,
-        };
-        final fileParts = <http.MultipartFile>[
-          http.MultipartFile.fromBytes('check_in_photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('image', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('machine_photo', photoBytes, filename: filename),
-        ];
-        response = await apiClient.postMultipart(primaryEndpoint, fields: fields, files: fileParts);
       } catch (_) {}
     }
 
@@ -304,16 +597,13 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] MACHINE CHECK-IN SUCCESS RESPONSE: $response');
-      }
       return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'machine_check_in');
     }
 
     throw Exception('Invalid response received from machine check-in endpoint.');
   }
 
-  /// Submit Team Attendance transaction for self or a team member via POST /api/v1/attendance/check-in/
+  /// Submit Team Attendance transaction
   Future<AttendanceModel> checkInTeamMember({
     required String targetUserId,
     required double latitude,
@@ -329,7 +619,6 @@ class AttendanceApiService {
     final currentUserIdStr = _getCleanUserId(user);
     final targetUserIdStr = targetUserId.trim().isNotEmpty ? targetUserId.trim() : currentUserIdStr;
 
-    // If marking attendance for self, route directly to self check-in endpoint
     if (targetUserIdStr == currentUserIdStr) {
       return checkIn(
         latitude: latitude,
@@ -343,66 +632,28 @@ class AttendanceApiService {
 
     final photoBase64 = _toBase64Photo(photoBytes);
 
+    dynamic parsedTargetId = int.tryParse(targetUserIdStr) ?? targetUserIdStr;
+    dynamic parsedCurrentId = int.tryParse(currentUserIdStr) ?? currentUserIdStr;
+
     final jsonBody = <String, dynamic>{
-      'user_id': targetUserIdStr,
-      'marked_for_user_id': targetUserIdStr,
-      'marked_by_user_id': currentUserIdStr,
+      'user_id': parsedTargetId,
+      'marked_for_user_id': parsedTargetId,
+      'marked_by_user_id': parsedCurrentId,
       'latitude': latitude,
       'longitude': longitude,
       'accuracy': accuracy,
       'location_source': locationSource,
       'attendance_type': 'TEAM',
-      'check_in_photo_base64': photoBase64,
       'check_in_photo': photoBase64,
-      'photo_base64': photoBase64,
-      'photo': photoBase64,
-      'image': photoBase64,
     };
 
-    if (kDebugMode) {
-      print('[AttendanceApiService] TEAM CHECK-IN STARTED for target_user_id: $targetUserIdStr by supervisor: $currentUserIdStr');
-    }
-
     dynamic response;
-
-    // 1. Primary JSON POST
     try {
       response = await apiClient.post(primaryEndpoint, body: jsonBody);
     } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Primary JSON team check-in failed ($e), trying secondary endpoint...');
-      }
       try {
         const secondaryEndpoint = '/api/v1/attendance/check-in';
         response = await apiClient.post(secondaryEndpoint, body: jsonBody);
-      } catch (e2) {
-        if (kDebugMode) {
-          print('[AttendanceApiService] Secondary JSON team check-in failed ($e2)...');
-        }
-      }
-    }
-
-    // 2. Fallback to Multipart Upload
-    if (response == null && photoBytes != null && photoBytes.isNotEmpty) {
-      try {
-        final filename = photoFilename ?? 'check_in_photo.jpg';
-        final fields = <String, String>{
-          'user_id': targetUserIdStr,
-          'marked_for_user_id': targetUserIdStr,
-          'marked_by_user_id': currentUserIdStr,
-          'latitude': latitude.toString(),
-          'longitude': longitude.toString(),
-          'accuracy': accuracy.toString(),
-          'location_source': locationSource,
-          'attendance_type': 'TEAM',
-          'check_in_photo_base64': photoBase64,
-        };
-        final fileParts = <http.MultipartFile>[
-          http.MultipartFile.fromBytes('check_in_photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('image', photoBytes, filename: filename),
-        ];
-        response = await apiClient.postMultipart(primaryEndpoint, fields: fields, files: fileParts);
       } catch (_) {}
     }
 
@@ -412,16 +663,13 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] TEAM CHECK-IN SUCCESS RESPONSE: $response');
-      }
       return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'team_check_in');
     }
 
     throw Exception('Failed to record team attendance on portal endpoint.');
   }
 
-  /// Submit employee Check-In transaction with photo and real-time GPS coordinates via POST /api/v1/attendance/check-in/
+  /// Submit employee Check-In transaction
   Future<AttendanceModel> checkIn({
     required double latitude,
     required double longitude,
@@ -436,68 +684,25 @@ class AttendanceApiService {
     final user = AuthStorageService().currentUser;
     final userIdStr = _getCleanUserId(user);
     final photoBase64 = _toBase64Photo(photoBytes);
+    dynamic parsedUserId = int.tryParse(userIdStr) ?? userIdStr;
 
     final jsonBody = <String, dynamic>{
-      'user_id': userIdStr,
+      'user_id': parsedUserId,
       'latitude': latitude,
       'longitude': longitude,
       'accuracy': accuracy,
       'location_source': locationSource,
       'attendance_type': 'TEAM',
-      'check_in_photo_base64': photoBase64,
       'check_in_photo': photoBase64,
-      'photo_base64': photoBase64,
-      'photo': photoBase64,
-      'image': photoBase64,
     };
 
-    if (kDebugMode) {
-      print('[AttendanceApiService] CHECK-IN STARTED for user_id: $userIdStr');
-      print('[AttendanceApiService] endpoint: $primaryEndpoint, lat: $latitude, lng: $longitude, acc: $accuracy, source: $locationSource');
-    }
-
     dynamic response;
-
-    // 1. Primary JSON POST
     try {
       response = await apiClient.post(primaryEndpoint, body: jsonBody);
     } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Primary JSON check-in failed ($e), trying secondary endpoint...');
-      }
       try {
         response = await apiClient.post(secondaryEndpoint, body: jsonBody);
-      } catch (e2) {
-        if (kDebugMode) {
-          print('[AttendanceApiService] Secondary JSON check-in failed ($e2), trying multipart...');
-        }
-      }
-    }
-
-    // 2. Fallback to Multipart Upload
-    if (response == null && photoBytes != null && photoBytes.isNotEmpty) {
-      try {
-        final filename = photoFilename ?? 'check_in_photo.jpg';
-        final fields = <String, String>{
-          'user_id': userIdStr,
-          'latitude': latitude.toString(),
-          'longitude': longitude.toString(),
-          'accuracy': accuracy.toString(),
-          'location_source': locationSource,
-          'attendance_type': 'TEAM',
-          'check_in_photo_base64': photoBase64,
-        };
-        final fileParts = <http.MultipartFile>[
-          http.MultipartFile.fromBytes('check_in_photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('image', photoBytes, filename: filename),
-        ];
-        response = await apiClient.postMultipart(primaryEndpoint, fields: fields, files: fileParts);
-      } catch (e) {
-        if (kDebugMode) {
-          print('[AttendanceApiService] Multipart check-in fallback failed: $e');
-        }
-      }
+      } catch (_) {}
     }
 
     AttendanceModel? parsed = _parseTodayAttendanceResponse(response);
@@ -506,16 +711,13 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] CHECK-IN SUCCESS RESPONSE: $response');
-      }
       return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'check_in');
     }
 
     throw Exception('Failed to record check-in on portal endpoint.');
   }
 
-  /// Submit employee Check-Out transaction with photo and real-time GPS coordinates via POST /api/v1/attendance/check-out/
+  /// Submit employee Check-Out transaction
   Future<AttendanceModel> checkOut({
     required String attendanceId,
     required double latitude,
@@ -545,44 +747,13 @@ class AttendanceApiService {
       'image': photoBase64,
     };
 
-    if (kDebugMode) {
-      print('[AttendanceApiService] CHECK-OUT STARTED for attendance_id: $attendanceId, user_id: $userIdStr');
-    }
-
     dynamic response;
-
-    // 1. Primary JSON POST
     try {
       response = await apiClient.post(primaryEndpoint, body: jsonBody);
     } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Primary JSON check-out failed ($e), trying secondary endpoint...');
-      }
       try {
         const secondaryEndpoint = '/api/v1/attendance/check-out';
         response = await apiClient.post(secondaryEndpoint, body: jsonBody);
-      } catch (_) {}
-    }
-
-    // 2. Fallback to Multipart Upload
-    if (response == null && photoBytes != null && photoBytes.isNotEmpty) {
-      try {
-        final filename = photoFilename ?? 'check_out_photo.jpg';
-        final fields = <String, String>{
-          'attendance_id': attendanceId,
-          'user_id': userIdStr,
-          'latitude': latitude.toString(),
-          'longitude': longitude.toString(),
-          'accuracy': accuracy.toString(),
-          'location_source': locationSource,
-          'check_out_photo_base64': photoBase64,
-        };
-        final fileParts = <http.MultipartFile>[
-          http.MultipartFile.fromBytes('check_out_photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('photo', photoBytes, filename: filename),
-          http.MultipartFile.fromBytes('image', photoBytes, filename: filename),
-        ];
-        response = await apiClient.postMultipart(primaryEndpoint, fields: fields, files: fileParts);
       } catch (_) {}
     }
 
@@ -592,36 +763,42 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] CHECK-OUT SUCCESS RESPONSE: $response');
-      }
       return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'check_out', isCheckOut: true);
     }
 
     throw Exception('Failed to record check-out on portal endpoint.');
   }
 
-  /// Fetch user attendance history timeline from GET /api/v1/attendance/history/
+  /// Fetch user attendance history timeline
   Future<List<AttendanceModel>> fetchHistory({
     int page = 0,
-    int size = 20,
+    int size = 50,
     String? statusFilter,
   }) async {
     final queryParams = 'page=$page&size=$size${statusFilter != null && statusFilter.isNotEmpty ? "&status=$statusFilter" : ""}';
     final primaryEndpoint = '/api/v1/attendance/history/?$queryParams';
+    final secondaryEndpoint = '/api/v1/attendance/?$queryParams';
+
+    List<AttendanceModel> allRecords = [];
 
     try {
       final response = await apiClient.get(primaryEndpoint);
-      return _parseAttendanceList(response);
-    } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] History endpoint error: $e');
-      }
-      return [];
+      final parsed = _parseAttendanceList(response);
+      allRecords.addAll(parsed);
+    } catch (_) {}
+
+    if (allRecords.isEmpty) {
+      try {
+        final response = await apiClient.get(secondaryEndpoint);
+        final parsed = _parseAttendanceList(response);
+        allRecords.addAll(parsed);
+      } catch (_) {}
     }
+
+    return allRecords;
   }
 
-  /// Fetch team pending attendance approvals for reporting manager from GET /api/v1/attendance/pending-approvals/
+  /// Fetch team pending attendance approvals
   Future<List<AttendanceModel>> fetchPendingApprovals({
     int page = 0,
     int size = 20,
@@ -640,32 +817,35 @@ class AttendanceApiService {
     }
   }
 
-  /// Reporting manager approves attendance transaction via POST /api/v1/attendance/{id}/approve/
-  Future<bool> approveAttendance(String attendanceId) async {
-    final endpoint = '/api/v1/attendance/$attendanceId/approve/';
-    try {
-      await apiClient.post(endpoint, body: {});
-      return true;
-    } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Approve attendance error: $e');
+  // Helper parsing methods
+  DailyMuster? _parseDailyMuster(dynamic response) {
+    if (response == null) return null;
+    if (response is Map<String, dynamic>) {
+      if (response.containsKey('data') && response['data'] is Map<String, dynamic>) {
+        return DailyMuster.fromJson(response['data'] as Map<String, dynamic>);
       }
-      return false;
+      return DailyMuster.fromJson(response);
     }
+    return null;
   }
 
-  /// Reporting manager rejects attendance transaction via POST /api/v1/attendance/{id}/reject/
-  Future<bool> rejectAttendance(String attendanceId, String reason) async {
-    final endpoint = '/api/v1/attendance/$attendanceId/reject/';
-    try {
-      await apiClient.post(endpoint, body: {'reason': reason});
-      return true;
-    } catch (e) {
-      if (kDebugMode) {
-        print('[AttendanceApiService] Reject attendance error: $e');
+  List<DailyMuster> _parseDailyMusterList(dynamic response) {
+    List<dynamic> list = [];
+    if (response is Map<String, dynamic>) {
+      dynamic data = response['data'] ?? response['results'] ?? response['content'] ?? response['items'] ?? response;
+      if (data is List) {
+        list = data;
+      } else if (response['musters'] is List) {
+        list = response['musters'] as List;
       }
-      return false;
+    } else if (response is List) {
+      list = response;
     }
+
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map((json) => DailyMuster.fromJson(json))
+        .toList();
   }
 
   List<AttendanceModel> _parseAttendanceList(dynamic response) {
@@ -677,8 +857,16 @@ class AttendanceApiService {
           list = data['team_members'] as List<dynamic>;
         } else if (data['results'] is List) {
           list = data['results'] as List<dynamic>;
+        } else if (data['history'] is List) {
+          list = data['history'] as List<dynamic>;
+        } else if (data['records'] is List) {
+          list = data['records'] as List<dynamic>;
+        } else if (data['machines'] is List) {
+          list = data['machines'] as List<dynamic>;
         } else if (data['content'] is List) {
           list = data['content'] as List<dynamic>;
+        } else if (data['items'] is List) {
+          list = data['items'] as List<dynamic>;
         }
       } else if (data is List) {
         list = data;
@@ -686,6 +874,14 @@ class AttendanceApiService {
         list = response['team_members'] as List<dynamic>;
       } else if (response['results'] is List) {
         list = response['results'] as List<dynamic>;
+      } else if (response['history'] is List) {
+        list = response['history'] as List<dynamic>;
+      } else if (response['records'] is List) {
+        list = response['records'] as List<dynamic>;
+      } else if (response['machines'] is List) {
+        list = response['machines'] as List<dynamic>;
+      } else if (response['items'] is List) {
+        list = response['items'] as List<dynamic>;
       }
     } else if (response is List) {
       list = response;

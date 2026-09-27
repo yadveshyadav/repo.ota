@@ -6,7 +6,7 @@ import 'package:hero_app/models/attendance_model.dart';
 import 'package:hero_app/models/machine.dart';
 import 'package:hero_app/repositories/attendance_repository.dart';
 
-class MockAttendanceRepository implements AttendanceRepository {
+class MockAttendanceRepository extends LocalAttendanceRepository {
   AttendanceModel? mockToday;
   final List<AttendanceModel> mockHistoryList = [];
   final List<AttendanceModel> mockPendingList = [];
@@ -175,6 +175,9 @@ class MockAttendanceRepository implements AttendanceRepository {
     mockPendingList.removeWhere((a) => a.id == attendanceId);
     return true;
   }
+
+  @override
+  Future<int> syncPendingRecords() async => 0;
 }
 
 void main() {

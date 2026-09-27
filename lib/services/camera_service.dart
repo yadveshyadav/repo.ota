@@ -51,16 +51,15 @@ class AttendanceCameraService {
     0x02, 0x11, 0x03, 0x11, 0x00, 0x3F, 0x00, 0xF7, 0xFA, 0x28, 0xA2, 0x80, 0x03, 0xFF, 0xD9,
   ];
 
-  /// Open device camera and capture selfie photo
+  /// Open device camera and capture selfie photo with optimized compression for instant upload
   Future<XFile?> capturePhoto() async {
     try {
       final XFile? photo = await _picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
-        imageQuality: 90,
-        // Keep enough resolution for ML Kit (needs ~100x100 face pixels).
-        maxWidth: 1600,
-        maxHeight: 1600,
+        imageQuality: 65,
+        maxWidth: 1024,
+        maxHeight: 1024,
       );
       return photo;
     } catch (e) {

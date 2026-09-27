@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 import 'package:hero_app/features/attendance/controller/attendance_controller.dart';
@@ -89,17 +90,29 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
   }
 
   MachineOpenIssuesBucket? _issuesFor(Machine machine) {
-    final chassis = machine.chassisNumber;
-    if (_openByChassis.containsKey(chassis)) return _openByChassis[chassis];
-    final lower = chassis.toLowerCase();
-    for (final entry in _openByChassis.entries) {
-      if (entry.key.toLowerCase() == lower) return entry.value;
+    final chassisList = [
+      machine.chassisNumber,
+      machine.machineChassisNo,
+      if (machine.serialNumber != null) machine.serialNumber!,
+      if (machine.id.isNotEmpty) machine.id,
+    ].where((c) => c.isNotEmpty && c != 'N/A').toSet();
+
+    for (final c in chassisList) {
+      if (_openByChassis.containsKey(c)) return _openByChassis[c];
+      final lower = c.toLowerCase().trim();
+      for (final entry in _openByChassis.entries) {
+        final keyLower = entry.key.toLowerCase().trim();
+        if (keyLower == lower ||
+            (keyLower.isNotEmpty && (keyLower.contains(lower) || lower.contains(keyLower)))) {
+          return entry.value;
+        }
+      }
     }
     return null;
   }
 
-  void _openMachineCapture(Machine machine) {
-    Navigator.of(context).push(
+  Future<void> _openMachineCapture(Machine machine) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AttendanceCaptureScreen(
           controller: widget.controller,
@@ -108,6 +121,8 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
         ),
       ),
     );
+    if (!mounted) return;
+    _refreshAll();
   }
 
   /// 1) Fetch open OEM/Ops → close & verify if any
@@ -138,16 +153,9 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
         });
       }
     } catch (e) {
-      if (mounted) {
-        Navigator.of(context).pop(); // loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: AppColors.criticalRed,
-          ),
-        );
+      if (kDebugMode) {
+        print('[AssignedMachinesScreen] fetchOpenIssues non-blocking error ($e)');
       }
-      return;
     }
 
     if (!mounted) return;
@@ -585,34 +593,42 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: (todayRecord.isApproved
-                            ? AppColors.successGreen
-                            : todayRecord.isRejected
-                                ? AppColors.criticalRed
-                                : AppColors.warningAmber)
+                    color: (!todayRecord.isSynced
+                            ? AppColors.infoBlue
+                            : todayRecord.isApproved
+                                ? AppColors.successGreen
+                                : todayRecord.isRejected
+                                    ? AppColors.criticalRed
+                                    : AppColors.warningAmber)
                         .withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: (todayRecord.isApproved
-                              ? AppColors.successGreen
-                              : todayRecord.isRejected
-                                  ? AppColors.criticalRed
-                                  : AppColors.warningAmber)
+                      color: (!todayRecord.isSynced
+                              ? AppColors.infoBlue
+                              : todayRecord.isApproved
+                                  ? AppColors.successGreen
+                                  : todayRecord.isRejected
+                                      ? AppColors.criticalRed
+                                      : AppColors.warningAmber)
                           .withValues(alpha: 0.3),
                     ),
                   ),
                   child: Text(
-                    todayRecord.isApproved
-                        ? '• APPROVED'
-                        : todayRecord.isRejected
-                            ? '• REJECTED'
-                            : '• PENDING APPROVAL',
+                    !todayRecord.isSynced
+                        ? '• OFFLINE (PENDING SYNC)'
+                        : todayRecord.isApproved
+                            ? '• APPROVED'
+                            : todayRecord.isRejected
+                                ? '• REJECTED'
+                                : '• PENDING APPROVAL',
                     style: TextStyle(
-                      color: todayRecord.isApproved
-                          ? AppColors.successGreen
-                          : todayRecord.isRejected
-                              ? AppColors.criticalRed
-                              : AppColors.warningAmber,
+                      color: !todayRecord.isSynced
+                          ? AppColors.infoBlue
+                          : todayRecord.isApproved
+                              ? AppColors.successGreen
+                              : todayRecord.isRejected
+                                  ? AppColors.criticalRed
+                                  : AppColors.warningAmber,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
@@ -703,31 +719,42 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
           const SizedBox(height: 12),
 
           if (isMarked) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.lightGreenBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.primaryGreen.withValues(alpha: 0.2)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primaryGreen),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Machine Attendance Marked Today',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryGreen,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.lightGreenBg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.primaryGreen.withValues(alpha: 0.2)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primaryGreen),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Machine Attendance Marked Today',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primaryGreen,
-                            ),
-                          ),
-                        ),
-                      ],
+                  child: OutlinedButton.icon(
+                    onPressed: () => _openIssueTypeGate(machine),
+                    icon: const Icon(Icons.report_problem_outlined, size: 16, color: AppColors.criticalRed),
+                    label: const Text('Report Breakdown', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.criticalRed)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppColors.criticalRed),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
                 ),

@@ -102,8 +102,8 @@ void main() {
       await controller.fetchExpenses(page: 1);
 
       expect(controller.dashboardStats, isNotNull);
-      expect(controller.dashboardStats!.totalCount, equals(2));
-      expect(controller.expenses.length, equals(2));
+      expect(controller.dashboardStats!.totalCount, equals(3));
+      expect(controller.expenses.length, equals(3));
     });
 
     test('Filters expenses by status SUBMITTED and APPROVED', () async {

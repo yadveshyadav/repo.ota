@@ -1,10 +1,13 @@
+import 'dart:io' show File;
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import '../core/utils/vendor_utils.dart';
 import '../features/auth/models/user_model.dart';
 import '../features/auth/services/auth_storage_service.dart';
 import '../models/app_notification.dart';
 import '../models/attendance_model.dart';
 import '../models/machine.dart';
+import '../models/muster_model.dart';
 import '../services/api/attendance_api_service.dart';
 import '../services/attendance_storage_service.dart';
 import '../services/notification_service.dart';
@@ -12,6 +15,33 @@ import 'machine_repository.dart';
 import 'user_repository.dart';
 
 abstract class AttendanceRepository {
+  // Documented DailyMuster APIs
+  Future<DailyMuster?> getTodaysMuster(String taskId);
+  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body);
+  Future<DailyMuster> getMusterDetail(String musterId);
+  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body);
+  Future<bool> submitMuster(String musterId, {String? stepUpToken});
+  Future<List<DailyMuster>> getPendingMusterApprovals();
+  Future<bool> approveMuster(String musterId, {String remarks});
+  Future<bool> rejectMuster(String musterId, {required String reason});
+  Future<List<DailyMuster>> getMusterHistoryForTask(String taskId);
+  Future<List<DailyMuster>> getGeneralMusterList();
+  Future<PhotoUploadUrlResponse> getPhotoUploadUrl({
+    required String musterId,
+    required String entryId,
+    String contentType = 'image/jpeg',
+  });
+  Future<bool> uploadAttendancePhoto({
+    required String uploadUrl,
+    required List<int> imageBytes,
+    String contentType = 'image/jpeg',
+  });
+  Future<String> getPhotoUrl({
+    required String musterId,
+    required String photoKey,
+  });
+
+  // Standard Attendance API methods
   Future<AttendanceModel?> getTodayAttendance();
   Future<List<Machine>> getAssignedMachines(String userId);
   Future<List<UserModel>> getAuthorizedTeamMembers(String supervisorId);
@@ -59,6 +89,7 @@ abstract class AttendanceRepository {
   });
   Future<bool> approveAttendance(String attendanceId);
   Future<bool> rejectAttendance(String attendanceId, String reason);
+  Future<int> syncPendingRecords();
 }
 
 /// Local Persistent Repository for Local/Testing Mode
@@ -66,6 +97,8 @@ class LocalAttendanceRepository implements AttendanceRepository {
   final AttendanceStorageService storageService;
   final MachineRepository machineRepository;
   final UserRepository userRepository;
+
+  final Map<String, DailyMuster> _localMusters = {};
 
   LocalAttendanceRepository({
     AttendanceStorageService? storageService,
@@ -75,6 +108,193 @@ class LocalAttendanceRepository implements AttendanceRepository {
         machineRepository = machineRepository ?? MockMachineRepository(),
         userRepository = userRepository ?? ApiUserRepository();
 
+  @override
+  Future<DailyMuster?> getTodaysMuster(String taskId) async {
+    final cleanTaskId = taskId.trim();
+    if (cleanTaskId.isEmpty) return null;
+    for (final muster in _localMusters.values) {
+      if (muster.workedOnTaskIds.contains(cleanTaskId)) {
+        return muster;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body) async {
+    final cleanTaskId = taskId.trim();
+    final id = 'muster_${DateTime.now().millisecondsSinceEpoch}';
+
+    List<MusterEntry> entryList = [];
+    if (body['entries'] is List) {
+      entryList = (body['entries'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map((e) => MusterEntry.fromJson(e))
+          .toList();
+    }
+
+    final muster = DailyMuster(
+      id: id,
+      clientMusterId: body['clientMusterId']?.toString() ?? id,
+      workedOnTaskIds: cleanTaskId.isNotEmpty ? [cleanTaskId] : [],
+      teamSource: body['teamSource']?.toString() ?? 'LOCAL_CREW',
+      vendorId: body['vendorId']?.toString() ?? 'VEND-01',
+      vendorName: body['vendorName']?.toString() ?? 'Hero Vendor',
+      headcount: body['headcount'] as int? ?? 1,
+      resources: body['resources'] is List ? body['resources'] as List : const [],
+      entries: entryList,
+      nilWork: body['nilWork'] as bool? ?? false,
+      nilWorkReason: body['nilWorkReason']?.toString(),
+      remarks: body['remarks']?.toString() ?? '',
+      status: 'DRAFT',
+      approvalStatus: 'PENDING',
+      createdAt: DateTime.now(),
+    );
+
+    _localMusters[id] = muster;
+    return muster;
+  }
+
+  @override
+  Future<DailyMuster> getMusterDetail(String musterId) async {
+    final m = _localMusters[musterId];
+    if (m != null) return m;
+    throw Exception('Muster $musterId not found in local store.');
+  }
+
+  @override
+  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body) async {
+    final existing = _localMusters[musterId];
+
+    List<MusterEntry> updatedEntries = existing?.entries ?? [];
+    if (body['entries'] is List) {
+      updatedEntries = (body['entries'] as List)
+          .whereType<Map<String, dynamic>>()
+          .map((e) => MusterEntry.fromJson(e))
+          .toList();
+    }
+
+    final updated = (existing ?? DailyMuster(
+      id: musterId,
+      clientMusterId: musterId,
+      workedOnTaskIds: const [],
+    )).copyWith(
+      entries: updatedEntries,
+      remarks: body['remarks']?.toString() ?? existing?.remarks ?? '',
+      updatedAt: DateTime.now(),
+    );
+
+    _localMusters[musterId] = updated;
+    return updated;
+  }
+
+  @override
+  Future<bool> submitMuster(String musterId, {String? stepUpToken}) async {
+    final existing = _localMusters[musterId];
+    if (existing != null) {
+      _localMusters[musterId] = existing.copyWith(
+        status: 'SUBMITTED',
+        approvalStatus: 'PENDING',
+        submittedAt: DateTime.now(),
+      );
+      return true;
+    }
+    return true;
+  }
+
+  @override
+  Future<List<DailyMuster>> getPendingMusterApprovals() async {
+    return _localMusters.values
+        .where((m) => m.status == 'SUBMITTED' || m.approvalStatus == 'PENDING')
+        .toList();
+  }
+
+  @override
+  Future<bool> approveMuster(String musterId, {String remarks = 'Attendance approved'}) async {
+    final existing = _localMusters[musterId];
+    if (existing != null) {
+      _localMusters[musterId] = existing.copyWith(
+        status: 'APPROVED',
+        approvalStatus: 'APPROVED',
+        approvedBy: 'Reporting Manager',
+        approvedAt: DateTime.now(),
+        remarks: remarks,
+      );
+      return true;
+    }
+    return true;
+  }
+
+  @override
+  Future<bool> rejectMuster(String musterId, {required String reason}) async {
+    final cleanReason = reason.trim();
+    if (cleanReason.isEmpty) {
+      throw Exception('Rejection reason is mandatory.');
+    }
+    final existing = _localMusters[musterId];
+    if (existing != null) {
+      _localMusters[musterId] = existing.copyWith(
+        status: 'REJECTED',
+        approvalStatus: 'REJECTED',
+        rejectionReason: cleanReason,
+        updatedAt: DateTime.now(),
+      );
+      return true;
+    }
+    return true;
+  }
+
+  @override
+  Future<List<DailyMuster>> getMusterHistoryForTask(String taskId) async {
+    final cleanTaskId = taskId.trim();
+    return _localMusters.values
+        .where((m) => m.workedOnTaskIds.contains(cleanTaskId))
+        .toList();
+  }
+
+  @override
+  Future<List<DailyMuster>> getGeneralMusterList() async {
+    return _localMusters.values.toList();
+  }
+
+  @override
+  Future<PhotoUploadUrlResponse> getPhotoUploadUrl({
+    required String musterId,
+    required String entryId,
+    String contentType = 'image/jpeg',
+  }) async {
+    final key = 'attendance/${DateTime.now().year}/${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().day.toString().padLeft(2, '0')}/${musterId}_$entryId.jpg';
+    return PhotoUploadUrlResponse(
+      success: true,
+      data: PhotoUploadData(
+        uploadUrl: 'https://hero-app-mock-s3.s3.amazonaws.com/$key',
+        photoKey: key,
+      ),
+    );
+  }
+
+  @override
+  Future<bool> uploadAttendancePhoto({
+    required String uploadUrl,
+    required List<int> imageBytes,
+    String contentType = 'image/jpeg',
+  }) async {
+    return true;
+  }
+
+  @override
+  Future<String> getPhotoUrl({
+    required String musterId,
+    required String photoKey,
+  }) async {
+    if (photoKey.isEmpty) return '';
+    if (photoKey.startsWith('http://') || photoKey.startsWith('https://')) {
+      return photoKey;
+    }
+    return 'https://hero-app-mock-s3.s3.amazonaws.com/$photoKey?temp_token=abc123val';
+  }
+
+  // Standard Attendance methods
   @override
   Future<AttendanceModel?> getTodayAttendance() async {
     final user = AuthStorageService().currentUser;
@@ -89,35 +309,54 @@ class LocalAttendanceRepository implements AttendanceRepository {
 
     if (allMachines.isEmpty) return [];
 
+    // System Admins see all fleet machines
     if (user != null && user.isAdmin) {
       return allMachines;
     }
 
-    final query = (user?.displayName.isNotEmpty == true ? user!.displayName : user?.username ?? '').toLowerCase();
-    final username = (user?.username ?? '').toLowerCase();
-    final phone = (user?.phoneNumber ?? '').toLowerCase();
-    final empId = (user?.employeeId ?? '').toLowerCase();
+    final cleanUserId = userId.trim().toLowerCase();
+    final currentUserId = (user?.id ?? '').trim().toLowerCase();
+    final displayName = (user?.displayName ?? '').trim().toLowerCase();
+    final username = (user?.username ?? '').trim().toLowerCase();
+    final name = (user?.name ?? '').trim().toLowerCase();
+    final phone = (user?.phoneNumber ?? '').trim().toLowerCase();
+    final empId = (user?.employeeId ?? '').trim().toLowerCase();
 
     final matched = allMachines.where((m) {
-      final opName = (m.operatorInfo is Map ? m.operatorInfo['name']?.toString() : m.operatorInfo?.toString())?.toLowerCase() ?? '';
-      final opMobile = (m.operatorInfo is Map ? m.operatorInfo['mobile']?.toString() : '')?.toLowerCase() ?? '';
-      final vendorName = m.vendorName?.toLowerCase() ?? '';
-      final chassis = m.machineChassisNo.toLowerCase();
+      final mChassis = m.machineChassisNo.trim().toLowerCase();
 
-      return opName.contains(query) ||
-          opName.contains(username) ||
-          (opMobile.isNotEmpty && phone.isNotEmpty && opMobile.contains(phone)) ||
-          vendorName.contains(query) ||
-          vendorName.contains(username) ||
-          (empId.isNotEmpty && (chassis.contains(empId) || opName.contains(empId)));
+      String mOpName = '';
+      String mOpMobile = '';
+      String mOpUserId = '';
+
+      if (m.operatorInfo is Map) {
+        final map = m.operatorInfo as Map;
+        mOpName = (map['name'] ?? map['operator_name'] ?? map['userName'] ?? '').toString().trim().toLowerCase();
+        mOpMobile = (map['mobile'] ?? map['phoneNumber'] ?? '').toString().trim().toLowerCase();
+        mOpUserId = (map['id'] ?? map['user_id'] ?? map['userId'] ?? '').toString().trim().toLowerCase();
+      } else if (m.operatorInfo != null) {
+        mOpName = m.operatorInfo.toString().trim().toLowerCase();
+      }
+
+      // 1. Direct Operator Match
+      final bool isOperatorMatch =
+          (mOpUserId.isNotEmpty && (mOpUserId == cleanUserId || mOpUserId == currentUserId)) ||
+          (mOpName.isNotEmpty &&
+              ((displayName.isNotEmpty && (mOpName.contains(displayName) || displayName.contains(mOpName))) ||
+              (username.isNotEmpty && (mOpName.contains(username) || username.contains(mOpName))) ||
+              (name.isNotEmpty && (mOpName.contains(name) || name.contains(mOpName))))) ||
+          (mOpMobile.isNotEmpty && phone.isNotEmpty && (mOpMobile.contains(phone) || phone.contains(mOpMobile))) ||
+          (empId.isNotEmpty && (mChassis.contains(empId) || mOpName.contains(empId)));
+
+      // 2. Vendor Match
+      final bool isVendorMatch = VendorUtils.isVendorMatch(m.vendorName, user?.vendorName) ||
+          VendorUtils.isVendorMatch(m.vendorName, user?.displayVendor) ||
+          (user != null && user.vendors.isNotEmpty && VendorUtils.matchesUserVendors(m.vendorName, user.vendors.map((v) => v['name']?.toString() ?? '').toSet()));
+
+      return isOperatorMatch || isVendorMatch;
     }).toList();
 
-    if (matched.isNotEmpty) {
-      return matched;
-    }
-
-    // Fallback: Return primary assigned machine for logged-in operator/vendor
-    return [allMachines.first];
+    return matched;
   }
 
   @override
@@ -178,6 +417,7 @@ class LocalAttendanceRepository implements AttendanceRepository {
       locationSource: locationSource,
       approvalStatus: 'PENDING',
       createdAt: now,
+      isSynced: false,
     );
 
     await storageService.saveRecord(model);
@@ -235,6 +475,7 @@ class LocalAttendanceRepository implements AttendanceRepository {
       locationSource: locationSource,
       approvalStatus: 'PENDING',
       createdAt: now,
+      isSynced: false,
     );
 
     await storageService.saveRecord(model);
@@ -291,6 +532,7 @@ class LocalAttendanceRepository implements AttendanceRepository {
       locationSource: locationSource,
       approvalStatus: 'PENDING',
       createdAt: now,
+      isSynced: false,
     );
 
     await storageService.saveRecord(model);
@@ -368,6 +610,7 @@ class LocalAttendanceRepository implements AttendanceRepository {
       approvedBy: existing.approvedBy,
       approvedAt: existing.approvedAt,
       createdAt: existing.createdAt,
+      isSynced: false,
     );
 
     await storageService.saveRecord(updated);
@@ -426,7 +669,6 @@ class LocalAttendanceRepository implements AttendanceRepository {
     if (index != -1) {
       final existing = all[index];
 
-      // Self approval check: Manager cannot approve their own attendance!
       if (existing.userId == currentAdminId ||
           existing.userName.toLowerCase() == currentAdminUsername.toLowerCase() ||
           existing.userName.toLowerCase() == currentAdminName.toLowerCase()) {
@@ -473,7 +715,6 @@ class LocalAttendanceRepository implements AttendanceRepository {
       );
       await storageService.saveRecord(updated);
 
-      // Trigger In-App Notification for Employee
       final dateStr = existing.checkInTime != null
           ? DateFormat('dd MMM yyyy').format(existing.checkInTime!)
           : 'Today';
@@ -551,7 +792,6 @@ class LocalAttendanceRepository implements AttendanceRepository {
       );
       await storageService.saveRecord(updated);
 
-      // Trigger In-App Notification for Employee
       final dateStr = existing.checkInTime != null
           ? DateFormat('dd MMM yyyy').format(existing.checkInTime!)
           : 'Today';
@@ -573,6 +813,9 @@ class LocalAttendanceRepository implements AttendanceRepository {
     }
     return false;
   }
+
+  @override
+  Future<int> syncPendingRecords() async => 0;
 }
 
 class ApiAttendanceRepository implements AttendanceRepository {
@@ -585,6 +828,208 @@ class ApiAttendanceRepository implements AttendanceRepository {
   })  : apiService = apiService ?? AttendanceApiService(),
         localFallback = localFallback ?? LocalAttendanceRepository();
 
+  @override
+  Future<DailyMuster?> getTodaysMuster(String taskId) async {
+    try {
+      final remote = await apiService.getTodaysMuster(taskId);
+      if (remote != null) return remote;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getTodaysMuster error: $e');
+      }
+    }
+    return await localFallback.getTodaysMuster(taskId);
+  }
+
+  @override
+  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body) async {
+    try {
+      final remote = await apiService.createMuster(taskId, body);
+      return remote;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] Remote createMuster failed ($e), saving locally...');
+      }
+      return await localFallback.createMuster(taskId, body);
+    }
+  }
+
+  @override
+  Future<DailyMuster> getMusterDetail(String musterId) async {
+    try {
+      final remote = await apiService.getMusterDetail(musterId);
+      return remote;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getMusterDetail error: $e');
+      }
+      return await localFallback.getMusterDetail(musterId);
+    }
+  }
+
+  @override
+  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body) async {
+    try {
+      final remote = await apiService.updateMuster(musterId, body);
+      return remote;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] Remote updateMuster failed ($e), updating locally...');
+      }
+      return await localFallback.updateMuster(musterId, body);
+    }
+  }
+
+  @override
+  Future<bool> submitMuster(String musterId, {String? stepUpToken}) async {
+    try {
+      return await apiService.submitMuster(musterId, stepUpToken: stepUpToken);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] Remote submitMuster failed ($e), submitting locally...');
+      }
+      return await localFallback.submitMuster(musterId, stepUpToken: stepUpToken);
+    }
+  }
+
+  @override
+  Future<List<DailyMuster>> getPendingMusterApprovals() async {
+    try {
+      final list = await apiService.getPendingMusterApprovals();
+      if (list.isNotEmpty) return list;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getPendingMusterApprovals error: $e');
+      }
+    }
+    return await localFallback.getPendingMusterApprovals();
+  }
+
+  @override
+  Future<bool> approveMuster(String musterId, {String remarks = 'Attendance approved'}) async {
+    try {
+      return await apiService.approveAttendance(musterId);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] approveMuster error: $e');
+      }
+      return await localFallback.approveMuster(musterId, remarks: remarks);
+    }
+  }
+
+  @override
+  Future<bool> rejectMuster(String musterId, {required String reason}) async {
+    final cleanReason = reason.trim();
+    if (cleanReason.isEmpty) {
+      throw Exception('Rejection reason is mandatory.');
+    }
+    try {
+      return await apiService.rejectAttendance(musterId, cleanReason);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] rejectMuster error: $e');
+      }
+      return await localFallback.rejectMuster(musterId, reason: cleanReason);
+    }
+  }
+
+  @override
+  Future<List<DailyMuster>> getMusterHistoryForTask(String taskId) async {
+    try {
+      final list = await apiService.getMusterHistoryForTask(taskId);
+      if (list.isNotEmpty) return list;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getMusterHistoryForTask error: $e');
+      }
+    }
+    return await localFallback.getMusterHistoryForTask(taskId);
+  }
+
+  @override
+  Future<List<DailyMuster>> getGeneralMusterList() async {
+    try {
+      final list = await apiService.getGeneralMusterList();
+      if (list.isNotEmpty) return list;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getGeneralMusterList error: $e');
+      }
+    }
+    return await localFallback.getGeneralMusterList();
+  }
+
+  @override
+  Future<PhotoUploadUrlResponse> getPhotoUploadUrl({
+    required String musterId,
+    required String entryId,
+    String contentType = 'image/jpeg',
+  }) async {
+    try {
+      return await apiService.getPhotoUploadUrl(
+        musterId: musterId,
+        entryId: entryId,
+        contentType: contentType,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getPhotoUploadUrl error ($e), falling back...');
+      }
+      return await localFallback.getPhotoUploadUrl(
+        musterId: musterId,
+        entryId: entryId,
+        contentType: contentType,
+      );
+    }
+  }
+
+  @override
+  Future<bool> uploadAttendancePhoto({
+    required String uploadUrl,
+    required List<int> imageBytes,
+    String contentType = 'image/jpeg',
+  }) async {
+    try {
+      return await apiService.uploadAttendancePhoto(
+        uploadUrl: uploadUrl,
+        imageBytes: imageBytes,
+        contentType: contentType,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] uploadAttendancePhoto error: $e');
+      }
+      return await localFallback.uploadAttendancePhoto(
+        uploadUrl: uploadUrl,
+        imageBytes: imageBytes,
+        contentType: contentType,
+      );
+    }
+  }
+
+  @override
+  Future<String> getPhotoUrl({
+    required String musterId,
+    required String photoKey,
+  }) async {
+    try {
+      final url = await apiService.getPhotoUrl(
+        musterId: musterId,
+        photoKey: photoKey,
+      );
+      if (url.isNotEmpty) return url;
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getPhotoUrl error: $e');
+      }
+    }
+    return await localFallback.getPhotoUrl(
+      musterId: musterId,
+      photoKey: photoKey,
+    );
+  }
+
+  // Standard Attendance API methods
   @override
   Future<AttendanceModel?> getTodayAttendance() async {
     try {
@@ -823,5 +1268,93 @@ class ApiAttendanceRepository implements AttendanceRepository {
   @override
   Future<bool> rejectAttendance(String attendanceId, String reason) async {
     return await apiService.rejectAttendance(attendanceId, reason);
+  }
+
+  @override
+  Future<int> syncPendingRecords() async {
+    final unsynced = await localFallback.storageService.getUnsyncedRecords();
+    if (unsynced.isEmpty) return 0;
+
+    final currentUser = AuthStorageService().currentUser;
+    final currentUserId = currentUser?.id ?? '';
+
+    final results = await Future.wait(unsynced.map((record) async {
+      try {
+        List<int>? photoBytes;
+        final photoPath = record.checkInPhotoUrl ?? record.checkOutPhotoUrl;
+        if (photoPath != null &&
+            photoPath.isNotEmpty &&
+            !photoPath.startsWith('http') &&
+            !photoPath.startsWith('data:')) {
+          try {
+            final file = File(photoPath);
+            if (await file.exists()) {
+              photoBytes = await file.readAsBytes();
+            }
+          } catch (_) {}
+        }
+
+        AttendanceModel? synced;
+
+        final targetUserIdStr = (record.markedForUserId != null && record.markedForUserId!.isNotEmpty)
+            ? record.markedForUserId!
+            : record.userId;
+
+        if (record.isMachineAttendance) {
+          final chassis = record.machineChassisNo ?? record.machineId ?? 'N/A';
+          synced = await apiService.checkInMachine(
+            machineChassisNo: chassis,
+            assignmentId: record.machineAssignmentId ?? chassis,
+            latitude: record.checkInLat ?? 0.0,
+            longitude: record.checkInLng ?? 0.0,
+            accuracy: record.checkInAccuracy ?? 10.0,
+            locationSource: record.locationSource ?? 'GPS',
+            photoBytes: photoBytes,
+          );
+        } else if (targetUserIdStr.isNotEmpty &&
+            (targetUserIdStr != currentUserId || record.markedForUserId != null)) {
+          synced = await apiService.checkInTeamMember(
+            targetUserId: targetUserIdStr,
+            latitude: record.checkInLat ?? 0.0,
+            longitude: record.checkInLng ?? 0.0,
+            accuracy: record.checkInAccuracy ?? 10.0,
+            locationSource: record.locationSource ?? 'GPS',
+            photoBytes: photoBytes,
+          );
+        } else if (record.isCheckedOut && record.checkOutTime != null) {
+          synced = await apiService.checkOut(
+            attendanceId: record.id,
+            latitude: record.checkOutLat ?? record.checkInLat ?? 0.0,
+            longitude: record.checkOutLng ?? record.checkInLng ?? 0.0,
+            accuracy: record.checkOutAccuracy ?? record.checkInAccuracy ?? 10.0,
+            locationSource: record.locationSource ?? 'GPS',
+            photoBytes: photoBytes,
+          );
+        } else {
+          synced = await apiService.checkIn(
+            latitude: record.checkInLat ?? 0.0,
+            longitude: record.checkInLng ?? 0.0,
+            accuracy: record.checkInAccuracy ?? 10.0,
+            locationSource: record.locationSource ?? 'GPS',
+            photoBytes: photoBytes,
+          );
+        }
+
+        final updated = synced.copyWith(isSynced: true);
+        await localFallback.storageService.saveRecord(updated);
+        return 1;
+      } catch (e) {
+        if (kDebugMode) {
+          print('[ApiAttendanceRepository] Auto-sync error for attendance ${record.id}: $e');
+        }
+        return 0;
+      }
+    }));
+
+    int totalSynced = 0;
+    for (final res in results) {
+      totalSynced += res;
+    }
+    return totalSynced;
   }
 }

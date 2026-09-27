@@ -83,6 +83,9 @@ class AttendanceStorageService {
 
   /// Load all saved attendance records
   Future<List<AttendanceModel>> getAllRecords() async {
+    if (_memoryRecords != null && _memoryRecords!.isNotEmpty) {
+      return List.from(_memoryRecords!);
+    }
     _memoryRecords ??= _getInitialSeedRecords();
 
     if (kIsWeb) {
@@ -123,20 +126,44 @@ class AttendanceStorageService {
   }
 
   /// Get today's attendance record for user
-  Future<AttendanceModel?> getTodayRecord(String userId) async {
+  Future<AttendanceModel?> getTodayRecord(String targetUserId) async {
     final all = await getAllRecords();
-    final now = DateTime.now();
+    if (all.isEmpty) return null;
+
+    final nowLocal = DateTime.now().toLocal();
+    final cleanTargetId = targetUserId.trim().toLowerCase();
+
     for (final item in all) {
-      final itemDate = item.checkInTime ?? item.createdAt;
-      if (itemDate != null &&
-          itemDate.year == now.year &&
-          itemDate.month == now.month &&
-          itemDate.day == now.day &&
-          (userId.isEmpty || item.userId == userId || item.employeeId == userId)) {
+      final itemDate = (item.checkInTime ?? item.createdAt)?.toLocal();
+      if (itemDate == null) continue;
+
+      final isSameDay = itemDate.year == nowLocal.year &&
+          itemDate.month == nowLocal.month &&
+          itemDate.day == nowLocal.day;
+
+      if (!isSameDay) continue;
+
+      if (cleanTargetId.isEmpty) return item;
+
+      final uId = item.userId.trim().toLowerCase();
+      final empId = (item.employeeId ?? '').trim().toLowerCase();
+      final markedForId = (item.markedForUserId ?? '').trim().toLowerCase();
+      final markedById = (item.markedByUserId ?? '').trim().toLowerCase();
+
+      if (uId == cleanTargetId ||
+          empId == cleanTargetId ||
+          markedForId == cleanTargetId ||
+          (markedById == cleanTargetId && !item.isMachineAttendance)) {
         return item;
       }
     }
     return null;
+  }
+
+  /// Get all unsynced attendance records (pending sync)
+  Future<List<AttendanceModel>> getUnsyncedRecords() async {
+    final all = await getAllRecords();
+    return all.where((r) => !r.isSynced).toList();
   }
 
   /// Save or update an attendance record locally
@@ -156,6 +183,12 @@ class AttendanceStorageService {
       final file = await _getRecordsFile();
       if (file != null) {
         final all = await getAllRecords();
+        final existingIndex = all.indexWhere((r) => r.id == record.id);
+        if (existingIndex != -1) {
+          all[existingIndex] = record;
+        } else {
+          all.insert(0, record);
+        }
         final jsonList = all.map((r) => r.toJson()).toList();
         await file.writeAsString(jsonEncode(jsonList));
       }

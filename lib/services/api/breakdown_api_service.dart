@@ -306,6 +306,31 @@ class MachineOpenIssue {
 
   bool get isOem => kind.toUpperCase() == 'OEM';
 
+  String get displayDuration {
+    final timeStr = startedAt;
+    if (timeStr == null || timeStr.trim().isEmpty) return 'Active';
+    final dt = DateTime.tryParse(timeStr.trim());
+    if (dt == null) return 'Active';
+
+    final diff = DateTime.now().difference(dt.toLocal());
+    if (diff.isNegative) return 'Just started';
+
+    if (diff.inDays >= 1) {
+      final days = diff.inDays;
+      final hours = diff.inHours % 24;
+      return hours > 0 ? '${days}d ${hours}h' : '${days}d';
+    }
+    if (diff.inHours >= 1) {
+      final hours = diff.inHours;
+      final mins = diff.inMinutes % 60;
+      return mins > 0 ? '${hours}h ${mins}m' : '${hours}h';
+    }
+    if (diff.inMinutes >= 1) {
+      return '${diff.inMinutes}m';
+    }
+    return 'Just started';
+  }
+
   factory MachineOpenIssue.fromJson(Map<String, dynamic> json) {
     return MachineOpenIssue(
       kind: (json['kind']?.toString() ?? 'OEM').toUpperCase(),

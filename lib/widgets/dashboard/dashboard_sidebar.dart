@@ -11,7 +11,9 @@ class DashboardSidebar extends StatefulWidget {
   final ValueChanged<String>? onRouteSelected;
   final bool isCollapsed;
   final int totalMachines;
+  final int commissionedMachines;
   final int onlineMachines;
+  final int idleMachines;
   final int offlineMachines;
   final int maintenanceMachines;
 
@@ -20,9 +22,11 @@ class DashboardSidebar extends StatefulWidget {
     this.selectedRoute = 'Dashboard',
     this.onRouteSelected,
     this.isCollapsed = false,
-    this.totalMachines = 25,
-    this.onlineMachines = 5,
-    this.offlineMachines = 17,
+    this.totalMachines = 33,
+    this.commissionedMachines = 18,
+    this.onlineMachines = 8,
+    this.idleMachines = 16,
+    this.offlineMachines = 6,
     this.maintenanceMachines = 3,
   });
 
@@ -32,7 +36,6 @@ class DashboardSidebar extends StatefulWidget {
 
 class _DashboardSidebarState extends State<DashboardSidebar> {
   late String _activeItem;
-  bool _machinesExpanded = true;
 
   @override
   void initState() {
@@ -87,75 +90,21 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
                           _buildGroupHeader(section.title),
 
                         for (final item in section.visibleItems) ...[
-                          if (item.title == 'Machines') ...[
-                            if (widget.isCollapsed)
-                              _SidebarTile(
-                                icon: item.icon,
-                                title: item.title,
-                                isSelected: _activeItem == 'Total Machines' ||
-                                    _activeItem == 'Machines' ||
-                                    _activeItem == 'Online' ||
-                                    _activeItem == 'Offline' ||
-                                    _activeItem == 'Maintenance',
-                                isCollapsed: true,
-                                badge: '${widget.totalMachines}',
-                                onTap: () => _selectItem('Total Machines'),
-                              )
-                            else
-                              _ExpandableSidebarTile(
-                                icon: item.icon,
-                                title: item.title,
-                                isExpanded: _machinesExpanded,
-                                onToggle: () {
-                                  setState(() {
-                                    _machinesExpanded = !_machinesExpanded;
-                                  });
-                                },
-                                children: [
-                                  _SidebarSubTile(
-                                    title: 'Total Machines',
-                                    count: '${widget.totalMachines}',
-                                    isSelected: _activeItem == 'Total Machines' || _activeItem == 'Machines',
-                                    onTap: () => _selectItem('Total Machines'),
-                                  ),
-                                  _SidebarSubTile(
-                                    title: 'Online',
-                                    count: '${widget.onlineMachines}',
-                                    badgeColor: AppColors.successGreen,
-                                    isSelected: _activeItem == 'Online',
-                                    onTap: () => _selectItem('Online'),
-                                  ),
-                                  _SidebarSubTile(
-                                    title: 'Offline',
-                                    count: '${widget.offlineMachines}',
-                                    badgeColor: AppColors.mutedTextGray,
-                                    isSelected: _activeItem == 'Offline',
-                                    onTap: () => _selectItem('Offline'),
-                                  ),
-                                  _SidebarSubTile(
-                                    title: 'Maintenance',
-                                    count: '${widget.maintenanceMachines}',
-                                    badgeColor: AppColors.warningAmber,
-                                    isSelected: _activeItem == 'Maintenance',
-                                    onTap: () => _selectItem('Maintenance'),
-                                  ),
-                                ],
-                              ),
-                          ] else ...[
-                            _SidebarTile(
-                              icon: item.icon,
-                              title: item.title,
-                              isSelected: _activeItem == item.title ||
-                                  (item.title == 'Live Tracking' && _activeItem == 'Live Status') ||
-                                  (item.title == 'My Tasks' && _activeItem == 'Tasks') ||
-                                  (item.title == 'Refuel Records' && _activeItem == 'Refuel') ||
-                                  (item.title == 'Reports' && _activeItem == 'Report Center') ||
-                                  (item.title == 'Alert Center' && _activeItem == 'Alerts') ||
-                                  (item.title == 'Vendors' && (_activeItem == 'Partners' || _activeItem == 'Vendors & Partners')),
-                              isCollapsed: widget.isCollapsed,
-                              onTap: () => _selectItem(item.title),
-                            ),
-                          ],
+                          _SidebarTile(
+                            icon: item.icon,
+                            title: item.title,
+                            isSelected: _activeItem == item.title ||
+                                (item.title == 'Machines' && (_activeItem == 'Machines' || _activeItem == 'Total Machines' || _activeItem == 'Online' || _activeItem == 'Offline' || _activeItem == 'Maintenance' || _activeItem == 'Commissioned' || _activeItem == 'Idle')) ||
+                                (item.title == 'Machine Shifting' && (_activeItem == 'Machine Shifting' || _activeItem == 'Machine Transfers' || _activeItem == 'Shifting' || _activeItem == 'Transfers')) ||
+                                (item.title == 'Live Tracking' && _activeItem == 'Live Status') ||
+                                (item.title == 'My Tasks' && _activeItem == 'Tasks') ||
+                                (item.title == 'Refuel Records' && _activeItem == 'Refuel') ||
+                                (item.title == 'Reports' && _activeItem == 'Report Center') ||
+                                (item.title == 'Alert Center' && _activeItem == 'Alerts') ||
+                                (item.title == 'Vendors' && (_activeItem == 'Partners' || _activeItem == 'Vendors & Partners')),
+                            isCollapsed: widget.isCollapsed,
+                            onTap: () => _selectItem(item.title),
+                          ),
                         ],
                         if (section.visibleItems.isNotEmpty)
                           const SizedBox(height: 6),
@@ -230,6 +179,11 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
             title: 'Machines',
             permission: 'machines.view',
             icon: Icons.precision_manufacturing_outlined,
+          ),
+          _NavItemData(
+            title: 'Machine Shifting',
+            permission: 'machines.view',
+            icon: Icons.alt_route_rounded,
           ),
           _NavItemData(
             title: 'Live Tracking',
@@ -350,15 +304,23 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
       ),
     ];
 
+    final user = AuthStorageService().currentUser;
+    final bool isVendorUser = user != null && user.isVendorUser;
+
     // Filter sections and items dynamically based on auth.can(permission)
     return allSections.map((section) {
-      final visible = section.items.where((item) => auth.can(item.permission)).toList();
+      final visible = section.items.where((item) {
+        if (isVendorUser && (item.title == 'Machine Shifting' || item.title == 'Transfers')) {
+          return false;
+        }
+        return auth.can(item.permission);
+      }).toList();
       return _NavSectionData(
         title: section.title,
         items: section.items,
         visibleItems: visible,
       );
-    }).toList();
+    }).where((section) => section.visibleItems.isNotEmpty).toList();
   }
 }
 
@@ -482,134 +444,5 @@ class _SidebarTile extends StatelessWidget {
     }
 
     return content;
-  }
-}
-
-class _ExpandableSidebarTile extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final bool isExpanded;
-  final VoidCallback onToggle;
-  final List<Widget> children;
-
-  const _ExpandableSidebarTile({
-    required this.icon,
-    required this.title,
-    required this.isExpanded,
-    required this.onToggle,
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        InkWell(
-          onTap: onToggle,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(
-              children: [
-                Icon(icon, color: AppColors.mutedTextGray, size: 18),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.deepNavy,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Icon(
-                  isExpanded ? Icons.expand_less : Icons.expand_more,
-                  color: AppColors.mutedTextGray,
-                  size: 18,
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (isExpanded)
-          Padding(
-            padding: const EdgeInsets.only(left: 16),
-            child: Column(children: children),
-          ),
-      ],
-    );
-  }
-}
-
-class _SidebarSubTile extends StatelessWidget {
-  final String title;
-  final String? count;
-  final Color? badgeColor;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _SidebarSubTile({
-    required this.title,
-    this.count,
-    this.badgeColor,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bgColor = isSelected ? AppColors.lightGreenBg : Colors.transparent;
-    final textColor =
-        isSelected ? AppColors.primaryGreen : AppColors.deepNavy;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w400,
-                    color: textColor,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (count != null)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: (badgeColor ?? AppColors.primaryGreen)
-                        .withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    count!,
-                    style: TextStyle(
-                      color: badgeColor ?? AppColors.primaryGreen,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }

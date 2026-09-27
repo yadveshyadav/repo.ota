@@ -115,29 +115,16 @@ class TaskController extends ChangeNotifier {
       if (kDebugMode) {
         print('[TaskController] fetchTasks error: $e');
       }
-      final cleanError = e.toString().replaceAll('Exception: ', '');
-      _errorMessage = cleanError;
-
-      if (_tasks.isEmpty) {
-        // Fallback to mock tasks for offline/dev preview if primary network call fails
-        final fallback = MockTaskRepository().getTasksSync(
-          page: page,
-          size: _pageSize,
-          filters: _filter,
-          search: _searchQuery,
-        );
-        _tasks = List.from(fallback.tasks);
-        _totalCount = fallback.totalCount;
-        _totalPages = fallback.totalPages;
-        _currentPage = fallback.currentPage;
-        _pageSize = fallback.pageSize;
-        _hasNext = fallback.hasNext;
-        _hasPrevious = fallback.hasPrevious;
-        _summaryCounts = Map.from(fallback.summaryCounts);
-      }
-
+      _tasks = [];
+      _totalCount = 0;
+      _totalPages = 1;
+      _currentPage = 0;
+      _hasNext = false;
+      _hasPrevious = false;
+      _summaryCounts = {};
       _isLoading = false;
       _isRefreshing = false;
+      _errorMessage = null;
       notifyListeners();
     }
   }

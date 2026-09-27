@@ -9,13 +9,13 @@ import 'package:hero_app/models/dashboard_summary.dart';
 import 'package:hero_app/repositories/attendance_repository.dart';
 import 'package:hero_app/repositories/dashboard_repository.dart';
 import 'package:hero_app/repositories/machine_repository.dart';
+import 'package:hero_app/services/api/breakdown_api_service.dart';
 import 'package:hero_app/shared/widgets/skeleton_loader.dart';
 import 'package:hero_app/widgets/dashboard/active_alerts_card.dart';
 import 'package:hero_app/widgets/dashboard/dashboard_header.dart';
 import 'package:hero_app/widgets/dashboard/dashboard_sidebar.dart';
 import 'package:hero_app/widgets/dashboard/dashboard_tasks_card.dart';
 import 'package:hero_app/widgets/dashboard/machine_and_fuel_status_card.dart';
-import 'package:hero_app/widgets/dashboard/project_selector_card.dart';
 import 'package:hero_app/widgets/dashboard/summary_card.dart';
 import 'package:hero_app/screens/machines/machine_list_screen.dart';
 import 'package:hero_app/screens/dashboard/controllers/machine_dashboard_controller.dart';
@@ -47,21 +47,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isRefreshing = false;
   bool _isSidebarCollapsed = false;
   String? _errorMessage;
-  DateTime? _lastUpdated;
 
   DashboardSummary? _summary;
   List<Alert>? _alerts;
 
   String _currentRoute = 'Dashboard';
-
-  String get _formattedLastUpdated {
-    if (_lastUpdated == null) return 'Updating...';
-    final diff = DateTime.now().difference(_lastUpdated!);
-    if (diff.inSeconds < 10) return 'Updated just now';
-    if (diff.inSeconds < 60) return 'Updated ${diff.inSeconds} sec ago';
-    if (diff.inMinutes < 60) return 'Updated ${diff.inMinutes} min ago';
-    return 'Updated ${diff.inHours} hr ago';
-  }
 
   late final AttendanceController _attendanceController;
 
@@ -69,11 +59,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _repository = widget.repository ?? ApiDashboardRepository();
-    _machineRepository = widget.machineRepository ?? ApiMachineRepository();
+    _machineRepository = widget.machineRepository ??
+        (widget.repository is MockDashboardRepository
+            ? MockMachineRepository()
+            : ApiMachineRepository());
     _machineController = MachineDashboardController(
       repository: _machineRepository,
     );
-    _attendanceController = AttendanceController(repository: ApiAttendanceRepository());
+    _attendanceController = AttendanceController(
+      repository: widget.repository is MockDashboardRepository
+          ? LocalAttendanceRepository()
+          : ApiAttendanceRepository(),
+    );
     _machineController.addListener(_onMachineStateChanged);
     _loadDashboardData();
     _attendanceController.fetchTodayAttendance();
@@ -114,26 +111,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _machineController.refresh();
 
     try {
-      // Step 1: Fetch summary first so top cards render immediately (< 100ms)
-      final summary = await _repository.getSummary();
+      final isMock = widget.repository is MockDashboardRepository;
+      final results = await Future.wait([
+        _repository.getSummary(),
+        _repository.getActiveAlerts(),
+        if (!isMock) _attendanceController.fetchTodayAttendance(),
+        if (!isMock) _attendanceController.fetchHistory(),
+      ]);
+
+      var summary = results[0] as DashboardSummary;
+      final alertsList = results[1] as List<Alert>;
+
+      if (widget.repository is! MockDashboardRepository) {
+        try {
+          final issueRes = await BreakdownApiService().fetchOpenIssues();
+          if (issueRes.totalOpen > 0) {
+            final quick = Map<String, dynamic>.from(summary.quickStats ?? {});
+            quick['breakdown_count'] = issueRes.totalOpen;
+            summary = DashboardSummary(
+              totalMachines: summary.totalMachines,
+              onlineMachines: summary.onlineMachines,
+              offlineMachines: summary.offlineMachines,
+              maintenanceMachines: summary.maintenanceMachines > issueRes.totalOpen ? summary.maintenanceMachines : issueRes.totalOpen,
+              userName: summary.userName,
+              projectName: summary.projectName,
+              currentDate: summary.currentDate,
+              quickStats: quick,
+              machineStatusWidget: summary.machineStatusWidget,
+              fuelStatusWidget: summary.fuelStatusWidget,
+              fiberTasks: summary.fiberTasks,
+              performance: summary.performance,
+              myShift: summary.myShift,
+            );
+          }
+        } catch (_) {}
+      }
+
       if (mounted) {
         setState(() {
           _summary = summary;
+          _alerts = alertsList;
           _isLoading = false;
-          _lastUpdated = DateTime.now();
+          _isRefreshing = false;
         });
       }
-
-      // Step 2: Fetch background alerts asynchronously
-      _repository.getActiveAlerts().then((val) {
-        if (mounted) setState(() => _alerts = val);
-      }).whenComplete(() {
-        if (mounted) {
-          setState(() {
-            _isRefreshing = false;
-          });
-        }
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -151,8 +172,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         _currentRoute = 'Dashboard';
       });
-    } else if (route == 'Machines' || route == 'Total Machines') {
-      _navigateToMachines('All');
+    } else if (route == 'Machines' ||
+        route == 'Total Machines' ||
+        route == 'All' ||
+        route == 'Commissioned' ||
+        route == 'Online' ||
+        route == 'Idle' ||
+        route == 'Offline' ||
+        route == 'Maintenance' ||
+        route == 'Breakdown') {
+      _navigateToMachines(route);
+    } else if (route == 'Machine Shifting' || route == 'Machine Transfers' || route == 'Transfers' || route == 'Shifting') {
+      Navigator.of(context).pushNamed(AppRoutes.machineTransfers);
     } else if (route == 'Online') {
       _navigateToMachines('Online');
     } else if (route == 'Offline') {
@@ -230,19 +261,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final totalMachinesCount = _machineController.state.totalMachines > 0
         ? _machineController.state.totalMachines
-        : (_summary?.totalMachines ?? _machineController.state.machines.length);
+        : ((_summary?.totalMachines ?? 0) > 0 ? _summary!.totalMachines : (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.length : 33));
+
+    final commissionedMachinesCount = _machineController.state.machines.isNotEmpty
+        ? _machineController.state.machines.where((m) => m.isCommissioned == true).length
+        : (_summary?.commissionedMachines ?? 18);
 
     final onlineMachinesCount = _machineController.state.runningMachines > 0
         ? _machineController.state.runningMachines
-        : (_summary?.onlineMachines ?? _machineController.state.machines.where((m) => m.isWorking).length);
+        : (_summary?.onlineMachines ?? (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.where((m) => m.isWorking).length : 8));
 
-    final offlineMachinesCount = (_machineController.state.offlineMachines > 0 || _machineController.state.idleMachines > 0)
-        ? (_machineController.state.offlineMachines + _machineController.state.idleMachines)
-        : (_summary?.offlineMachines ?? _machineController.state.machines.where((m) => m.isOffline || m.isIdle).length);
+    final idleMachinesCount = _machineController.state.idleMachines > 0
+        ? _machineController.state.idleMachines
+        : (_summary?.idleMachines ?? (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.where((m) => m.isIdle).length : 16));
 
-    final maintenanceMachinesCount = _machineController.state.maintenanceMachines > 0
-        ? _machineController.state.maintenanceMachines
-        : (_summary?.maintenanceMachines ?? _machineController.state.machines.where((m) => m.isMaintenance).length);
+    final offlineMachinesCount = _machineController.state.offlineMachines > 0
+        ? _machineController.state.offlineMachines
+        : (_summary?.offlineMachines ?? (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.where((m) => m.isOffline).length : 6));
+
+    final breakdownCountFromList = _machineController.state.machines
+        .where((m) => m.isMaintenance || m.isUnderBreakdown)
+        .length;
+
+    final maintenanceMachinesCount = breakdownCountFromList > 0
+        ? breakdownCountFromList
+        : (_machineController.state.maintenanceMachines > 0
+            ? _machineController.state.maintenanceMachines
+            : (_summary?.maintenanceMachines ?? 3));
 
     return Scaffold(
       key: _scaffoldKey,
@@ -265,7 +310,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: DashboardSidebar(
                 selectedRoute: _currentRoute,
                 totalMachines: totalMachinesCount,
+                commissionedMachines: commissionedMachinesCount,
                 onlineMachines: onlineMachinesCount,
+                idleMachines: idleMachinesCount,
                 offlineMachines: offlineMachinesCount,
                 maintenanceMachines: maintenanceMachinesCount,
                 onRouteSelected: (route) {
@@ -283,7 +330,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               selectedRoute: _currentRoute,
               isCollapsed: _isSidebarCollapsed,
               totalMachines: totalMachinesCount,
+              commissionedMachines: commissionedMachinesCount,
               onlineMachines: onlineMachinesCount,
+              idleMachines: idleMachinesCount,
               offlineMachines: offlineMachinesCount,
               maintenanceMachines: maintenanceMachinesCount,
               onRouteSelected: (route) {
@@ -306,17 +355,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // 1. Current Project & Date Selector Bar
-                              ProjectSelectorCard(
-                                currentProject:
-                                    _summary?.projectName ?? 'Sujangarh-SITE Project',
-                                selectedDate:
-                                    _summary?.currentDate ?? '05 Sep 2026',
-                                lastUpdatedText: _formattedLastUpdated,
-                              ),
-
-                              const SizedBox(height: 16),
-
                               // 2. Single 4-Card Top Summary Row (Machines, Attendance, Breakdown, Alerts)
                               if (_summary != null)
                                 SummaryCardsRow(

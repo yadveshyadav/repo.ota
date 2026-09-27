@@ -23,6 +23,8 @@ class OtaCheckResult {
 /// Central Service managing OTA metadata fetching, version comparison, and update checks
 class OtaUpdateService {
   static const String defaultMetadataUrl =
+      'https://raw.githubusercontent.com/yadveshyadav/hero.ota/main/version.json';
+  static const String fallbackMetadataUrl =
       'https://raw.githubusercontent.com/yadveshyadav/hero.ota/main/update.json';
 
   final http.Client _client;
@@ -40,37 +42,54 @@ class OtaUpdateService {
     } catch (_) {
       return PackageInfo(
         appName: 'Hero',
-        packageName: 'com.infocrats.hero',
-        version: '1.0.0',
-        buildNumber: '1',
+        packageName: 'com.infocrats.heroapp',
+        version: '1.0.2',
+        buildNumber: '10',
       );
     }
   }
 
-  /// Fetches remote update.json and parses strongly typed OtaUpdateInfo
+  /// Fetches remote metadata (version.json / update.json) and parses strongly typed OtaUpdateInfo
   Future<OtaUpdateInfo> fetchRemoteUpdateInfo() async {
     try {
       final response = await _client.get(Uri.parse(metadataUrl)).timeout(
         const Duration(seconds: 12),
       );
 
-      if (response.statusCode != 200) {
-        throw Exception('Server returned HTTP ${response.statusCode}');
+      if (response.statusCode == 200) {
+        final bodyStr = response.body.trim();
+        if (bodyStr.isNotEmpty) {
+          final Map<String, dynamic> jsonMap = jsonDecode(bodyStr);
+          return OtaUpdateInfo.fromJson(jsonMap);
+        }
       }
-
-      final bodyStr = response.body.trim();
-      if (bodyStr.isEmpty) {
-        throw Exception('Empty response from update server');
-      }
-
-      final Map<String, dynamic> jsonMap = jsonDecode(bodyStr);
-      return OtaUpdateInfo.fromJson(jsonMap);
     } catch (e) {
       if (kDebugMode) {
-        print('[OtaUpdateService] Fetch metadata error: $e');
+        print('[OtaUpdateService] Primary fetch metadata error ($metadataUrl): $e');
       }
-      rethrow;
     }
+
+    // Try fallback URL if using default
+    if (metadataUrl == defaultMetadataUrl) {
+      try {
+        final response = await _client.get(Uri.parse(fallbackMetadataUrl)).timeout(
+          const Duration(seconds: 12),
+        );
+        if (response.statusCode == 200) {
+          final bodyStr = response.body.trim();
+          if (bodyStr.isNotEmpty) {
+            final Map<String, dynamic> jsonMap = jsonDecode(bodyStr);
+            return OtaUpdateInfo.fromJson(jsonMap);
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('[OtaUpdateService] Fallback fetch metadata error ($fallbackMetadataUrl): $e');
+        }
+      }
+    }
+
+    throw Exception('Unable to check for updates from server.');
   }
 
   /// Executes check for updates: gets installed version, fetches remote metadata, compares version codes numerically

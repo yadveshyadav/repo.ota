@@ -1,0 +1,6 @@
+{
+  "version_code": 12,
+  "version_name": "1.0.4",
+  "apk_url": "https://raw.githubusercontent.com/yadveshyadav/hero.ota/main/Hero.apk",
+  "release_notes": "Hero App v1.0.4 Release: Pramaanu REST API attendance integration, GPS telemetry, member-machine matching, 2-minute background auto-sync, and enhanced breakdown management styling."
+}

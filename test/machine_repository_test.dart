@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hero_app/features/auth/models/user_model.dart';
 import 'package:hero_app/models/machine.dart';
 import 'package:hero_app/models/machine_response.dart';
 import 'package:hero_app/repositories/machine_repository.dart';
@@ -60,6 +61,56 @@ void main() {
     });
   });
 
+  group('MachineResponse.filteredForUser tests', () {
+    test('Admin user gets unfiltered machines', () {
+      final response = const MachineResponse(
+        success: true,
+        total: 2,
+        machines: [
+          Machine(machineChassisNo: 'CHASSIS_1'),
+          Machine(machineChassisNo: 'CHASSIS_2'),
+        ],
+      );
+
+      final adminUser = const UserModel(
+        id: '1',
+        username: 'admin',
+        email: 'admin@hero.com',
+        role: 'ADMIN',
+        roles: ['ADMIN'],
+      );
+
+      final filtered = response.filteredForUser(adminUser);
+      expect(filtered.total, equals(2));
+      expect(filtered.machines.length, equals(2));
+    });
+
+    test('Operator user gets only assigned machine', () {
+      final response = const MachineResponse(
+        success: true,
+        total: 3,
+        machines: [
+          Machine(machineChassisNo: 'CHASSIS_1'),
+          Machine(machineChassisNo: 'CHASSIS_2'),
+          Machine(machineChassisNo: 'CHASSIS_3'),
+        ],
+      );
+
+      final operatorUser = const UserModel(
+        id: '5',
+        username: 'operator_1',
+        email: 'op@hero.com',
+        role: 'OPERATOR',
+        roles: ['OPERATOR'],
+        machineChassis: 'CHASSIS_2',
+      );
+
+      final filtered = response.filteredForUser(operatorUser);
+      expect(filtered.total, equals(1));
+      expect(filtered.machines.first.machineChassisNo, equals('CHASSIS_2'));
+    });
+  });
+
   group('MachineDashboardController State & Polling Lifecycle tests', () {
     test('Initial fetch sets totalMachines from repository', () async {
       final controller = MachineDashboardController(
@@ -70,8 +121,8 @@ void main() {
       await Future.delayed(const Duration(milliseconds: 400));
 
       expect(controller.state.isLoading, isFalse);
-      expect(controller.state.totalMachines, equals(25));
-      expect(controller.state.machines.length, equals(25));
+      expect(controller.state.totalMachines, equals(35));
+      expect(controller.state.machines.length, equals(35));
 
       controller.dispose();
     });
@@ -82,7 +133,7 @@ void main() {
       );
 
       await Future.delayed(const Duration(milliseconds: 400));
-      expect(controller.state.totalMachines, equals(25));
+      expect(controller.state.totalMachines, equals(35));
 
       // Trigger fetch on failing repository instance
       final failingController = MachineDashboardController(

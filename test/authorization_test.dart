@@ -151,6 +151,23 @@ void main() {
       expect(authService.can('users.view'), isFalse);
     });
 
+    test('Role string with spaces or case variations is normalized correctly', () {
+      const user = UserModel(
+        id: '20',
+        username: 'fleet_admin_user',
+        email: 'fleet@hero.com',
+        role: 'Fleet Admin',
+        roles: ['FLEET ADMIN'],
+      );
+
+      authService.initialize(user: user);
+
+      expect(authService.can('dashboard.view'), isTrue);
+      expect(authService.can('machines.view'), isTrue);
+      expect(authService.can('roles.view'), isTrue);
+      expect(authService.can('users.manage'), isTrue);
+    });
+
     test('Logout clears authorization state completely', () {
       const user = UserModel(
         id: '1',

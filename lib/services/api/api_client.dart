@@ -20,12 +20,30 @@ class ApiClient {
             ),
         _client = client ?? http.Client();
 
+  String? get authToken => _authToken;
+
   void setAuthToken(String token) {
     _authToken = token;
   }
 
   void clearAuthToken() {
     _authToken = null;
+  }
+
+  Uri _buildUri(String endpoint) {
+    if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
+      return Uri.parse(endpoint);
+    }
+    final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    var cleanEp = endpoint.startsWith('/') ? endpoint : '/$endpoint';
+
+    // Django APPEND_SLASH safety: ensure endpoints without query params end with trailing slash '/'
+    // to prevent 301 Moved Permanently redirects that convert POST -> GET and drop POST body.
+    if (!cleanEp.contains('?') && !cleanEp.endsWith('/')) {
+      cleanEp = '$cleanEp/';
+    }
+
+    return Uri.parse('$cleanBase$cleanEp');
   }
 
   Map<String, String> get _headers {
@@ -61,9 +79,7 @@ class ApiClient {
     if (redirectCount > 3) {
       throw Exception('Too many HTTP redirects (301/302/307/308) while contacting server.');
     }
-    final uri = endpoint.startsWith('http://') || endpoint.startsWith('https://')
-        ? Uri.parse(endpoint)
-        : Uri.parse('$baseUrl$endpoint');
+    final uri = _buildUri(endpoint);
     try {
       final response = await _client
           .get(uri, headers: _headers)
@@ -97,9 +113,7 @@ class ApiClient {
     if (redirectCount > 3) {
       throw Exception('Too many HTTP redirects (301/302/307/308) while contacting server.');
     }
-    final uri = endpoint.startsWith('http://') || endpoint.startsWith('https://')
-        ? Uri.parse(endpoint)
-        : Uri.parse('$baseUrl$endpoint');
+    final uri = _buildUri(endpoint);
     try {
       final reqHeaders = Map<String, String>.from(_headers);
       if (isPublic || endpoint.contains('/auth/login') || endpoint.contains('/auth/register')) {
@@ -137,6 +151,81 @@ class ApiClient {
     }
   }
 
+  Future<dynamic> put(
+    String endpoint, {
+    Map<String, dynamic>? body,
+    int redirectCount = 0,
+  }) async {
+    if (redirectCount > 3) {
+      throw Exception('Too many HTTP redirects (301/302/307/308) while contacting server.');
+    }
+    final uri = _buildUri(endpoint);
+    try {
+      final reqHeaders = Map<String, String>.from(_headers);
+      final response = await _client
+          .put(
+            uri,
+            headers: reqHeaders,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode >= 300 && response.statusCode < 400) {
+        final redirectUrl = response.headers['location'];
+        if (redirectUrl != null && redirectUrl.isNotEmpty) {
+          if (kDebugMode) {
+            print('[ApiClient] PUT [301 Redirect] from $uri to $redirectUrl');
+          }
+          return await put(
+            redirectUrl,
+            body: body,
+            redirectCount: redirectCount + 1,
+          );
+        }
+      }
+
+      return _processResponse(response);
+    } catch (e) {
+      if (e.toString().contains('TimeoutException')) {
+        throw Exception('Server connection timed out. Please check your network or try again.');
+      }
+      rethrow;
+    }
+  }
+
+  /// Upload raw byte payload (e.g. JPEG image) to presigned uploadUrl
+  Future<http.Response> putRawBytes(
+    String uploadUrl,
+    List<int> bytes, {
+    String contentType = 'image/jpeg',
+  }) async {
+    final uri = Uri.parse(uploadUrl);
+    final headers = <String, String>{
+      'Content-Type': contentType,
+    };
+    try {
+      if (kDebugMode) {
+        print('[ApiClient] Uploading ${bytes.length} bytes via PUT to presigned URL: $uploadUrl');
+      }
+      final response = await _client
+          .put(uri, headers: headers, body: bytes)
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (kDebugMode) {
+          print('[ApiClient] Raw bytes PUT failed [${response.statusCode}]: ${response.body}');
+        }
+        throw Exception('Failed to upload image [${response.statusCode}]: ${response.reasonPhrase}');
+      }
+      return response;
+    } catch (e) {
+      if (e.toString().contains('TimeoutException')) {
+        throw Exception('Photo upload timed out. Please check your connection and try again.');
+      }
+      rethrow;
+    }
+  }
+
   Future<dynamic> postMultipart(
     String endpoint, {
     required Map<String, String> fields,
@@ -147,21 +236,16 @@ class ApiClient {
     if (redirectCount > 3) {
       throw Exception('Too many HTTP redirects (301/302/307/308) during file upload.');
     }
-    final uri = endpoint.startsWith('http://') || endpoint.startsWith('https://')
-        ? Uri.parse(endpoint)
-        : Uri.parse('$baseUrl$endpoint');
+    final uri = _buildUri(endpoint);
     try {
       final request = http.MultipartRequest('POST', uri);
 
-      // Attach headers
       final authHeaders = Map<String, String>.from(_headers);
-      authHeaders.remove('Content-Type'); // Multipart request calculates boundary
+      authHeaders.remove('Content-Type');
       request.headers.addAll(authHeaders);
 
-      // Attach text fields
       request.fields.addAll(fields);
 
-      // Attach photo file(s)
       if (file != null) {
         request.files.add(file);
       }

@@ -103,10 +103,18 @@ class MockDashboardRepository implements DashboardRepository {
   Future<DashboardSummary> getSummary() async {
     await Future.delayed(const Duration(milliseconds: 300));
     return const DashboardSummary(
-      totalMachines: 22,
-      onlineMachines: 18,
-      offlineMachines: 4,
-      maintenanceMachines: 0,
+      totalMachines: 33,
+      onlineMachines: 8,
+      offlineMachines: 22,
+      maintenanceMachines: 3,
+      quickStats: {
+        'total_machines': 33,
+        'commissioned_machines': 18,
+        'running_machines': 8,
+        'idle_machines': 16,
+        'maintenance_machines': 3,
+        'offline_machines': 6,
+      },
     );
   }
 

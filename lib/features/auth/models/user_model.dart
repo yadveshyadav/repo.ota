@@ -23,6 +23,7 @@ class UserModel {
   final bool isActive;
   final String? avatar;
   final DateTime? dateJoined;
+  final String? machineChassis;
 
   const UserModel({
     required this.id,
@@ -46,13 +47,55 @@ class UserModel {
     this.isActive = true,
     this.avatar,
     this.dateJoined,
+    this.machineChassis,
   });
 
+  String? get vendorId {
+    if (vendor is Map) {
+      return (vendor['id'] ?? vendor['vendorId'] ?? vendor['vendor_id'])?.toString();
+    }
+    if (vendorDetails != null) {
+      return (vendorDetails!['id'] ?? vendorDetails!['vendorId'] ?? vendorDetails!['vendor_id'])?.toString();
+    }
+    if (vendor != null && vendor is! Map) {
+      return vendor.toString();
+    }
+    return null;
+  }
+
   String get displayName {
-    if (name.isNotEmpty) return name;
+    // 1. First + Last name if non-numeric
     final combined = '$firstName $lastName'.trim();
-    if (combined.isNotEmpty) return combined;
-    return username;
+    if (combined.isNotEmpty && !RegExp(r'^\d+$').hasMatch(combined)) {
+      return combined;
+    }
+
+    // 2. Name if non-numeric
+    final cleanName = name.trim();
+    if (cleanName.isNotEmpty && !RegExp(r'^\d+$').hasMatch(cleanName)) {
+      return cleanName;
+    }
+
+    // 3. Vendor Name if available
+    final v = vendorName ??
+        (vendorDetails != null ? vendorDetails!['name']?.toString() : null) ??
+        (vendors.isNotEmpty ? vendors.first['name']?.toString() : null);
+
+    if (v != null && v.trim().isNotEmpty && v != 'Unassigned Vendor') {
+      return v.trim();
+    }
+
+    // 4. Username if non-numeric
+    final cleanUsername = username.trim();
+    if (cleanUsername.isNotEmpty && !RegExp(r'^\d+$').hasMatch(cleanUsername)) {
+      return cleanUsername;
+    }
+
+    // 5. Fallback to vendor name or non-empty string
+    if (v != null && v.trim().isNotEmpty && v != 'Unassigned Vendor') return v.trim();
+    if (cleanName.isNotEmpty && cleanName != 'Employee' && cleanName != 'User') return cleanName;
+
+    return 'HERO User';
   }
 
   String get fullName => displayName;
@@ -156,7 +199,12 @@ class UserModel {
       vDetails = Map<String, dynamic>.from(json['vendor_details'] as Map);
     }
 
+    final vendorObj = json['vendor'] is Map<String, dynamic> ? json['vendor'] as Map<String, dynamic> : null;
+    final vendorStr = json['vendor'] is String ? json['vendor'] as String : null;
+
     final vName = json['vendor_name']?.toString() ??
+        (vendorObj != null ? vendorObj['name']?.toString() : null) ??
+        (vendorStr != null && vendorStr.trim().isNotEmpty ? vendorStr.trim() : null) ??
         (vDetails != null ? vDetails['name']?.toString() : null) ??
         (vendorsList.isNotEmpty ? vendorsList.first['name']?.toString() : null);
 
@@ -180,6 +228,11 @@ class UserModel {
       parsedJoined = DateTime.tryParse(json['createdAt'].toString());
     }
 
+    final rawMachine = json['machine']?.toString() ??
+        json['machine_chassis_no']?.toString() ??
+        json['machine_id']?.toString() ??
+        json['machineChassis']?.toString();
+
     return UserModel(
       id: rawId.toString(),
       externalUserId: extId,
@@ -202,6 +255,7 @@ class UserModel {
       isActive: json['is_active'] as bool? ?? json['isActive'] as bool? ?? true,
       avatar: json['avatar']?.toString(),
       dateJoined: parsedJoined,
+      machineChassis: (rawMachine != null && rawMachine.isNotEmpty && rawMachine != 'null') ? rawMachine : null,
     );
   }
 

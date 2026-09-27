@@ -130,7 +130,24 @@ class Machine {
   });
 
   // Convenient Getters for Live Status & HERO Web UI
+  String get uniqueKey {
+    if (machineChassisNo.isNotEmpty && machineChassisNo != 'N/A') {
+      return machineChassisNo;
+    }
+    if (id.isNotEmpty && id != 'N/A') {
+      return id;
+    }
+    if (serialNumber != null && serialNumber!.isNotEmpty && serialNumber != 'N/A') {
+      return serialNumber!;
+    }
+    if (code != null && code!.isNotEmpty) {
+      return code!;
+    }
+    return '$machineName-$siteId';
+  }
+
   String get chassisNumber => machineChassisNo.isNotEmpty ? machineChassisNo : (serialNumber ?? 'N/A');
+  String get registrationNo => vehicleNo?.toString() ?? code ?? chassisNumber;
   String get model => modelCode ?? modelName ?? 'A600';
   String get machineName =>
       modelName ?? modelCode ?? (machineChassisNo.isNotEmpty ? 'Machine $machineChassisNo' : 'Heavy Machine');
@@ -228,7 +245,13 @@ class Machine {
       operationalState == OperationalState.offline ||
       status.toLowerCase().contains('offline');
 
-  bool get isMaintenance => status.toLowerCase().contains('maintenance');
+  bool get isMaintenance =>
+      status.toLowerCase().contains('maintenance') ||
+      status.toLowerCase().contains('breakdown') ||
+      status.toLowerCase().contains('under breakdown') ||
+      status.toLowerCase().contains('repair');
+
+  bool get isUnderBreakdown => isMaintenance;
   bool get isWorking => operationalState == OperationalState.working || status.toLowerCase() == 'running';
   bool get isMoving => operationalState == OperationalState.moving || speed > 1.0;
   bool get isIdle => operationalState == OperationalState.idle;
@@ -237,6 +260,12 @@ class Machine {
   bool get isPowerCut => operationalState == OperationalState.powerCut;
 
   factory Machine.fromJson(Map<String, dynamic> json) {
+    final machineObj = json['machine'] is Map<String, dynamic>
+        ? json['machine'] as Map<String, dynamic>
+        : json['equipment'] is Map<String, dynamic>
+            ? json['equipment'] as Map<String, dynamic>
+            : null;
+
     final chassis = json['machine_chassis_no']?.toString() ??
         json['machine_no']?.toString() ??
         json['machineNo']?.toString() ??
@@ -245,6 +274,12 @@ class Machine {
         json['chassisNumber']?.toString() ??
         json['chassis']?.toString() ??
         json['serial_number']?.toString() ??
+        json['serialNumber']?.toString() ??
+        machineObj?['machine_chassis_no']?.toString() ??
+        machineObj?['chassis_no']?.toString() ??
+        machineObj?['chassis']?.toString() ??
+        machineObj?['serial_number']?.toString() ??
+        machineObj?['id']?.toString() ??
         json['id']?.toString() ??
         '';
 
@@ -263,10 +298,12 @@ class Machine {
 
     final lat = (json['current_latitude'] as num?)?.toDouble() ??
         (json['latitude'] as num?)?.toDouble() ??
+        (machineObj?['latitude'] as num?)?.toDouble() ??
         0.0;
 
     final lng = (json['current_longitude'] as num?)?.toDouble() ??
         (json['longitude'] as num?)?.toDouble() ??
+        (machineObj?['longitude'] as num?)?.toDouble() ??
         0.0;
 
     final fuelPct = (json['fuel_percentage'] as num?)?.toDouble() ??
@@ -278,21 +315,37 @@ class Machine {
     final engineOnBool = json['engine_on'] as bool? ??
         (rawStatus.toUpperCase() == 'RUNNING');
 
+    final mName = json['name']?.toString() ??
+        json['model_name']?.toString() ??
+        json['modelName']?.toString() ??
+        json['machineName']?.toString() ??
+        json['title']?.toString() ??
+        machineObj?['name']?.toString() ??
+        machineObj?['model_name']?.toString() ??
+        machineObj?['title']?.toString();
+
+    final mCode = json['model_code']?.toString() ??
+        json['model']?.toString() ??
+        json['modelCode']?.toString() ??
+        machineObj?['model_code']?.toString() ??
+        machineObj?['model']?.toString();
+
+    final sName = json['site_name']?.toString() ??
+        json['location_name']?.toString() ??
+        json['siteName']?.toString() ??
+        json['location']?.toString() ??
+        machineObj?['site_name']?.toString() ??
+        machineObj?['location_name']?.toString();
+
     return Machine(
       machineChassisNo: chassis,
       engineNo: json['engine_no']?.toString() ?? json['engineNo']?.toString(),
-      modelCode: json['model_code']?.toString() ?? json['model']?.toString() ?? json['modelCode']?.toString(),
-      modelName: json['name']?.toString() ??
-          json['model_name']?.toString() ??
-          json['modelName']?.toString() ??
-          json['machineName']?.toString(),
+      modelCode: mCode,
+      modelName: mName,
       siteId: json['site_id'] is int
           ? json['site_id'] as int
           : int.tryParse(json['site_id']?.toString() ?? ''),
-      siteName: json['site_name']?.toString() ??
-          json['location_name']?.toString() ??
-          json['siteName']?.toString() ??
-          json['location']?.toString(),
+      siteName: sName,
       isCommissioned: json['is_commissioned'] as bool? ??
           json['isCommissioned'] as bool?,
       vehicleNo: json['vehicle_no'] ?? json['vehicleNo'],

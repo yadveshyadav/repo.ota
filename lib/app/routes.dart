@@ -17,11 +17,16 @@ import 'package:hero_app/screens/dashboard/dashboard_screen.dart';
 import 'package:hero_app/screens/machines/machine_detail_screen.dart';
 import 'package:hero_app/screens/machines/machine_list_screen.dart';
 import 'package:hero_app/screens/machines/refuel_history_screen.dart';
+import 'package:hero_app/screens/machine_transfer/machine_transfer_detail_screen.dart';
+import 'package:hero_app/screens/machine_transfer/machine_transfer_flow_screen.dart';
+import 'package:hero_app/screens/machine_transfer/machine_transfers_list_screen.dart';
 import 'package:hero_app/screens/notifications/notification_screen.dart';
 import 'package:hero_app/screens/roles/roles_permissions_screen.dart';
 import 'package:hero_app/shared/widgets/hero_page_route.dart';
 import 'package:hero_app/screens/users/users_screen.dart';
 import 'package:hero_app/services/authorization_service.dart';
+
+import '../features/auth/services/auth_storage_service.dart';
 
 /// Centralized route definitions and permission-guarded generator for HERO APP.
 abstract class AppRoutes {
@@ -41,6 +46,9 @@ abstract class AppRoutes {
   static const String inventory = '/inventory';
   static const String expenses = '/expenses';
   static const String notifications = '/notifications';
+  static const String machineTransfers = '/machine-transfers';
+  static const String machineTransferFlow = '/machine-transfer-flow';
+  static const String machineTransferDetail = '/machine-transfer-detail';
 
   // Navigation placeholders
   static const String map = '/map';
@@ -107,6 +115,26 @@ abstract class AppRoutes {
               permission: 'refuel.view',
               builder: (ctx) => const RefuelHistoryScreen(),
             )(context),
+        machineTransfers: (context) {
+          final user = AuthStorageService().currentUser;
+          if (user != null && user.isVendorUser) {
+            return const ForbiddenScreen(routeName: 'Machine Shifting');
+          }
+          return _guardRoute(
+            permission: 'machines.view',
+            builder: (ctx) => const MachineTransfersListScreen(),
+          )(context);
+        },
+        machineTransferFlow: (context) {
+          final user = AuthStorageService().currentUser;
+          if (user != null && user.isVendorUser) {
+            return const ForbiddenScreen(routeName: 'Machine Shifting');
+          }
+          return _guardRoute(
+            permission: 'machines.view',
+            builder: (ctx) => const MachineTransferFlowScreen(),
+          )(context);
+        },
       };
 
   static WidgetBuilder _guardRoute({
@@ -236,6 +264,25 @@ abstract class AppRoutes {
         return _buildGuardedPageRoute(
           permission: 'machines.view',
           builder: (_) => MachineDetailScreen(chassisNo: chassisNo),
+          settings: settings,
+        );
+      case machineTransfers:
+        return _buildGuardedPageRoute(
+          permission: 'machines.view',
+          builder: (_) => const MachineTransfersListScreen(),
+          settings: settings,
+        );
+      case machineTransferFlow:
+        return _buildGuardedPageRoute(
+          permission: 'machines.view',
+          builder: (_) => const MachineTransferFlowScreen(),
+          settings: settings,
+        );
+      case machineTransferDetail:
+        final transferId = settings.arguments as String? ?? '';
+        return _buildGuardedPageRoute(
+          permission: 'machines.view',
+          builder: (_) => MachineTransferDetailScreen(transferId: transferId),
           settings: settings,
         );
       default:

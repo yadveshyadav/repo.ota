@@ -39,6 +39,7 @@ class AttendanceModel {
   final DateTime? approvedAt;
   final String? rejectionReason;
   final DateTime? createdAt;
+  final bool isSynced;
 
   const AttendanceModel({
     required this.id,
@@ -76,10 +77,15 @@ class AttendanceModel {
     this.approvedAt,
     this.rejectionReason,
     this.createdAt,
+    this.isSynced = true,
   });
 
-  bool get isMachineAttendance => attendanceType.toUpperCase() == 'MACHINE';
-  bool get isTeamAttendance => attendanceType.toUpperCase() == 'TEAM';
+  bool get isPendingSync => !isSynced;
+  bool get isMachineAttendance =>
+      attendanceType.toUpperCase().contains('MACHINE') ||
+      (machineChassisNo != null && machineChassisNo!.trim().isNotEmpty) ||
+      (machineId != null && machineId!.trim().isNotEmpty);
+  bool get isTeamAttendance => !isMachineAttendance;
 
   bool get isCheckedIn => status == 'CHECKED_IN' || (checkInTime != null && checkOutTime == null);
   bool get isCheckedOut => status == 'CHECKED_OUT' || (checkInTime != null && checkOutTime != null);
@@ -98,6 +104,84 @@ class AttendanceModel {
     if (isPendingApproval || status == 'PENDING') return 'Pending Approval';
     if (isCheckedOut) return 'Checked Out';
     return 'Not Marked';
+  }
+
+  AttendanceModel copyWith({
+    String? id,
+    String? userId,
+    String? userName,
+    String? employeeId,
+    String? reportingManagerId,
+    String? reportingManagerName,
+    String? attendanceType,
+    String? machineId,
+    String? machineChassisNo,
+    String? machineAssignmentId,
+    String? vendorId,
+    String? siteId,
+    String? markedForUserId,
+    String? markedForUserName,
+    String? markedByUserId,
+    String? markedByUserName,
+    String? status,
+    DateTime? checkInTime,
+    DateTime? checkOutTime,
+    double? checkInLat,
+    double? checkInLng,
+    double? checkInAccuracy,
+    String? checkInPhotoUrl,
+    String? locationSource,
+    double? checkOutLat,
+    double? checkOutLng,
+    double? checkOutAccuracy,
+    String? checkOutPhotoUrl,
+    int? totalWorkingSeconds,
+    String? formattedWorkingHours,
+    String? approvalStatus,
+    String? approvedBy,
+    DateTime? approvedAt,
+    String? rejectionReason,
+    DateTime? createdAt,
+    bool? isSynced,
+  }) {
+    return AttendanceModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      userName: userName ?? this.userName,
+      employeeId: employeeId ?? this.employeeId,
+      reportingManagerId: reportingManagerId ?? this.reportingManagerId,
+      reportingManagerName: reportingManagerName ?? this.reportingManagerName,
+      attendanceType: attendanceType ?? this.attendanceType,
+      machineId: machineId ?? this.machineId,
+      machineChassisNo: machineChassisNo ?? this.machineChassisNo,
+      machineAssignmentId: machineAssignmentId ?? this.machineAssignmentId,
+      vendorId: vendorId ?? this.vendorId,
+      siteId: siteId ?? this.siteId,
+      markedForUserId: markedForUserId ?? this.markedForUserId,
+      markedForUserName: markedForUserName ?? this.markedForUserName,
+      markedByUserId: markedByUserId ?? this.markedByUserId,
+      markedByUserName: markedByUserName ?? this.markedByUserName,
+      status: status ?? this.status,
+      checkInTime: checkInTime ?? this.checkInTime,
+      checkOutTime: checkOutTime ?? this.checkOutTime,
+      checkInLat: checkInLat ?? this.checkInLat,
+      checkInLng: checkInLng ?? this.checkInLng,
+      checkInAccuracy: checkInAccuracy ?? this.checkInAccuracy,
+      checkInPhotoUrl: checkInPhotoUrl ?? this.checkInPhotoUrl,
+      locationSource: locationSource ?? this.locationSource,
+      checkOutLat: checkOutLat ?? this.checkOutLat,
+      checkOutLng: checkOutLng ?? this.checkOutLng,
+      checkOutAccuracy: checkOutAccuracy ?? this.checkOutAccuracy,
+      checkOutPhotoUrl: checkOutPhotoUrl ?? this.checkOutPhotoUrl,
+      totalWorkingSeconds: totalWorkingSeconds ?? this.totalWorkingSeconds,
+      formattedWorkingHours: formattedWorkingHours ?? this.formattedWorkingHours,
+      approvalStatus: approvalStatus ?? this.approvalStatus,
+      approvedBy: approvedBy ?? this.approvedBy,
+      approvedAt: approvedAt ?? this.approvedAt,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      createdAt: createdAt ?? this.createdAt,
+      isSynced: isSynced ?? this.isSynced,
+    );
   }
 
   /// Checks if attendance record can be approved by [user] (Admin or assigned Reporting Manager)
@@ -201,6 +285,35 @@ class AttendanceModel {
       workingHrs = '${hrs.toString().padLeft(2, '0')}h ${mins.toString().padLeft(2, '0')}m';
     }
 
+    final machineObj = source['machine'] is Map<String, dynamic> ? source['machine'] as Map<String, dynamic> : null;
+
+    final mChassis = source['machine_chassis_no']?.toString() ??
+        source['machineChassisNo']?.toString() ??
+        source['chassis_no']?.toString() ??
+        source['chassisNo']?.toString() ??
+        source['chassis_number']?.toString() ??
+        source['chassisNumber']?.toString() ??
+        source['chassis']?.toString() ??
+        source['machine_no']?.toString() ??
+        source['machineNo']?.toString() ??
+        source['serial_number']?.toString() ??
+        source['serialNumber']?.toString() ??
+        machineObj?['machine_chassis_no']?.toString() ??
+        machineObj?['chassis_no']?.toString() ??
+        machineObj?['chassis']?.toString() ??
+        machineObj?['serial_number']?.toString() ??
+        machineObj?['id']?.toString();
+
+    final mId = source['machine_id']?.toString() ??
+        source['machineId']?.toString() ??
+        machineObj?['id']?.toString() ??
+        (source['machine'] is! Map ? source['machine']?.toString() : null);
+
+    final rawType = (source['attendance_type'] ?? source['attendanceType'])?.toString().toUpperCase() ?? '';
+    final parsedType = rawType.isNotEmpty
+        ? (rawType.contains('MACHINE') ? 'MACHINE' : rawType)
+        : ((mChassis != null && mChassis.isNotEmpty) || (mId != null && mId.isNotEmpty) ? 'MACHINE' : 'TEAM');
+
     return AttendanceModel(
       id: rawId.toString(),
       userId: uId,
@@ -208,9 +321,9 @@ class AttendanceModel {
       employeeId: source['employee_id']?.toString() ?? source['employeeId']?.toString() ?? userObj?['employee_id']?.toString() ?? currentUser?.employeeId,
       reportingManagerId: source['reporting_manager_id']?.toString() ?? managerObj?['id']?.toString() ?? currentUser?.reportingManagerId,
       reportingManagerName: managerName,
-      attendanceType: source['attendance_type']?.toString().toUpperCase() ?? source['attendanceType']?.toString().toUpperCase() ?? 'TEAM',
-      machineId: source['machine_id']?.toString() ?? source['machineId']?.toString(),
-      machineChassisNo: source['machine_chassis_no']?.toString() ?? source['machineChassisNo']?.toString(),
+      attendanceType: parsedType,
+      machineId: mId,
+      machineChassisNo: mChassis,
       machineAssignmentId: source['machine_assignment_id']?.toString() ?? source['machineAssignmentId']?.toString(),
       vendorId: source['vendor_id']?.toString() ?? source['vendorId']?.toString(),
       siteId: source['site_id']?.toString() ?? source['siteId']?.toString(),
@@ -253,6 +366,7 @@ class AttendanceModel {
       approvedAt: parseDate(source['approved_at'] ?? source['approvedAt']),
       rejectionReason: source['rejection_reason']?.toString() ?? source['rejectionReason']?.toString(),
       createdAt: parseDate(source['created_at'] ?? source['createdAt']),
+      isSynced: source['is_synced'] as bool? ?? source['isSynced'] as bool? ?? true,
     );
   }
 
@@ -260,6 +374,7 @@ class AttendanceModel {
         'id': id,
         'user_id': userId,
         'user_name': userName,
+        'is_synced': isSynced,
         if (employeeId != null) 'employee_id': employeeId,
         if (reportingManagerId != null) 'reporting_manager_id': reportingManagerId,
         if (reportingManagerName != null) 'reporting_manager_name': reportingManagerName,

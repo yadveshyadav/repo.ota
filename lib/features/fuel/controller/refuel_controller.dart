@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../../models/refuel_model.dart';
-import '../../../repositories/refuel_repository.dart';
+import 'package:hero_app/repositories/refuel_repository.dart';
 
 /// State Controller managing Refuel History timeline, summary metrics, and API sync
 class RefuelController extends ChangeNotifier {

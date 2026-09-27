@@ -9,6 +9,7 @@ import '../../services/authorization_service.dart';
 import '../../shared/widgets/premium_card.dart';
 import 'machine_tracking_screen.dart';
 import 'refuel_history_screen.dart';
+import '../machine_transfer/machine_transfer_flow_screen.dart';
 
 /// Machine Details Screen matching reference design exactly
 class MachineDetailScreen extends StatefulWidget {
@@ -115,6 +116,19 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.alt_route_rounded, color: AppColors.white),
+            onPressed: () {
+              if (machine != null) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MachineTransferFlowScreen(preSelectedMachine: machine),
+                  ),
+                );
+              }
+            },
+            tooltip: 'Shift Machine',
+          ),
           IconButton(
             icon: const Icon(Icons.navigation_rounded, color: AppColors.white),
             onPressed: () {
@@ -289,6 +303,27 @@ class _MachineDetailScreenState extends State<MachineDetailScreen> {
                   'Operator: $opName • Vendor: $vName',
                   style: AppTextStyles.caption,
                   overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 32,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => MachineTransferFlowScreen(preSelectedMachine: machine),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.alt_route_rounded, size: 14),
+                    label: const Text('SHIFT MACHINE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryGreen,
+                      foregroundColor: AppColors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                  ),
                 ),
               ],
             ),

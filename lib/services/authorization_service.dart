@@ -47,6 +47,11 @@ class AuthorizationService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Helper to normalize role strings (e.g. "Fleet Admin" -> "FLEET_ADMIN")
+  static String _normalizeRole(String role) {
+    return role.trim().toUpperCase().replaceAll(' ', '_');
+  }
+
   /// Recalculate effective permissions from user roles and direct permissions.
   void _recalculatePermissions(List<String>? directPermissions) {
     final permissions = <String>{};
@@ -68,8 +73,9 @@ class AuthorizationService extends ChangeNotifier {
     // 2. Permissions derived from registered system roles
     if (_currentUser!.roles.isNotEmpty && _allSystemRoles.isNotEmpty) {
       for (final roleCode in _currentUser!.roles) {
+        final normCode = _normalizeRole(roleCode);
         final matchedRole = _allSystemRoles.firstWhere(
-          (r) => r.code.toUpperCase() == roleCode.toUpperCase() || r.name.toUpperCase() == roleCode.toUpperCase(),
+          (r) => _normalizeRole(r.code) == normCode || _normalizeRole(r.name) == normCode,
           orElse: () => RoleModel(id: 0, name: roleCode, code: roleCode),
         );
         if (matchedRole.permissionCodes.isNotEmpty) {
@@ -78,11 +84,20 @@ class AuthorizationService extends ChangeNotifier {
       }
     }
 
-    // 3. Role-based Default Permissions (ALWAYS merged to guarantee full role capabilities)
-    final userRoles = _currentUser!.roles.map((r) => r.toUpperCase()).toSet();
-    userRoles.add(_currentUser!.role.toUpperCase());
+    // 3. Role-based Default Permissions
+    final rawUserRoles = <String>{};
+    rawUserRoles.addAll(_currentUser!.roles);
+    if (_currentUser!.role.isNotEmpty) {
+      rawUserRoles.add(_currentUser!.role);
+    }
+    final userRoles = rawUserRoles.map((r) => _normalizeRole(r)).toSet();
 
-    if (_currentUser!.isAdmin || userRoles.contains('ADMIN') || userRoles.contains('FLEET ADMIN')) {
+    final isAdminUser = _currentUser!.isAdmin ||
+        userRoles.contains('ADMIN') ||
+        userRoles.contains('FLEET_ADMIN') ||
+        userRoles.contains('FLEETADMIN');
+
+    if (isAdminUser) {
       permissions.addAll([
         'dashboard.view',
         'machines.view', 'machines.create', 'machines.update', 'machines.delete', 'machines.manage',
@@ -93,44 +108,58 @@ class AuthorizationService extends ChangeNotifier {
         'vendors.view', 'vendors.manage',
         'users.view', 'users.create', 'users.update', 'users.delete', 'users.manage',
         'roles.view', 'roles.create', 'roles.update', 'roles.delete', 'roles.manage',
-        'reports.view', 'notifications.view', 'settings.view', 'settings.manage',
+        'reports.view', 'notifications.view', 'settings.view', 'settings.manage', 'mapview.view',
       ]);
-    } else if (userRoles.contains('PROJECT_MANAGER')) {
-      permissions.addAll([
-        'dashboard.view', 'machines.view', 'machines.manage', 'tracking.view',
-        'tasks.view', 'tasks.create', 'tasks.update', 'tasks.delete',
-        'team.view', 'attendance.view', 'attendance.approve', 'expenses.view', 'fuel.view', 'refuel.view',
-        'maintenance.view', 'breakdowns.view', 'inventory.view', 'inventory.manage',
-        'vendors.view', 'users.view', 'reports.view', 'notifications.view', 'settings.view',
-      ]);
-    } else if (userRoles.contains('ENGINEER')) {
-      permissions.addAll([
-        'dashboard.view', 'machines.view', 'tracking.view',
-        'tasks.view', 'tasks.create', 'tasks.update', 'attendance.view', 'team.view',
-        'maintenance.view', 'breakdowns.view', 'inventory.view',
-        'reports.view', 'notifications.view',
-      ]);
-    } else if (userRoles.contains('SUPERVISOR')) {
-      permissions.addAll([
-        'dashboard.view', 'machines.view', 'tracking.view',
-        'tasks.view', 'tasks.update', 'attendance.view', 'attendance.approve', 'team.view',
-        'fuel.view', 'refuel.view', 'notifications.view',
-      ]);
-    } else if (userRoles.contains('OPERATOR')) {
-      permissions.addAll([
-        'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view', 'team.view',
-        'attendance.view', 'fuel.view', 'refuel.view', 'notifications.view',
-      ]);
-    } else if (userRoles.contains('VENDOR')) {
-      permissions.addAll([
-        'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view',
-        'team.view', 'attendance.view', 'attendance.approve',
-        'maintenance.view', 'breakdowns.view', 'fuel.view', 'refuel.view', 'reports.view', 'notifications.view',
-      ]);
-    } else {
-      permissions.addAll([
-        'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view', 'attendance.view', 'team.view', 'reports.view',
-      ]);
+    } else if (permissions.isEmpty) {
+      // Apply role-based default capability sets only if no explicit permissions were supplied from API
+      if (userRoles.contains('PROJECT_MANAGER') || userRoles.contains('PROJECTMANAGER')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'machines.manage', 'tracking.view',
+          'tasks.view', 'tasks.create', 'tasks.update', 'tasks.delete',
+          'team.view', 'attendance.view', 'attendance.approve', 'expenses.view', 'fuel.view', 'refuel.view',
+          'maintenance.view', 'breakdowns.view', 'inventory.view', 'inventory.manage',
+          'vendors.view', 'users.view', 'reports.view', 'notifications.view', 'settings.view', 'mapview.view',
+        ]);
+      } else if (userRoles.contains('ENGINEER') || userRoles.contains('SITE_ENGINEER')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view',
+          'tasks.view', 'tasks.create', 'tasks.update', 'attendance.view', 'team.view',
+          'maintenance.view', 'breakdowns.view', 'inventory.view',
+          'reports.view', 'notifications.view', 'mapview.view',
+        ]);
+      } else if (userRoles.contains('SUPERVISOR')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view',
+          'tasks.view', 'tasks.update', 'attendance.view', 'attendance.approve', 'team.view',
+          'fuel.view', 'refuel.view', 'notifications.view', 'mapview.view',
+        ]);
+      } else if (userRoles.contains('OPERATOR')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view', 'team.view',
+          'attendance.view', 'fuel.view', 'refuel.view', 'notifications.view',
+        ]);
+      } else if (userRoles.contains('VENDOR')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view',
+          'team.view', 'attendance.view', 'attendance.approve',
+          'maintenance.view', 'breakdowns.view', 'fuel.view', 'refuel.view', 'reports.view', 'notifications.view',
+        ]);
+      } else if (userRoles.contains('VIEWER')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view', 'reports.view', 'mapview.view',
+        ]);
+      } else if (userRoles.contains('ALL_VIEWER') || userRoles.contains('ALLVIEWER')) {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view', 'team.view',
+          'attendance.view', 'expenses.view', 'fuel.view', 'refuel.view',
+          'maintenance.view', 'breakdowns.view', 'inventory.view',
+          'vendors.view', 'users.view', 'roles.view', 'reports.view', 'notifications.view', 'settings.view', 'mapview.view',
+        ]);
+      } else {
+        permissions.addAll([
+          'dashboard.view', 'machines.view', 'tracking.view', 'tasks.view', 'attendance.view', 'team.view', 'reports.view', 'notifications.view',
+        ]);
+      }
     }
 
     _effectivePermissions = permissions;
