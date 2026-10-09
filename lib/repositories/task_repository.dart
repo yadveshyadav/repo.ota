@@ -4,6 +4,7 @@ import 'package:hero_app/models/task_master_snapshots.dart';
 import 'package:hero_app/models/task_media_model.dart';
 import 'package:hero_app/models/task_model.dart';
 import 'package:hero_app/models/task_response.dart';
+import 'package:hero_app/core/constants/app_constants.dart';
 import 'package:hero_app/services/api/api_client.dart';
 import 'package:hero_app/services/api/task_api_service.dart';
 
@@ -29,7 +30,10 @@ class ApiTaskRepository implements TaskRepository {
 
   ApiTaskRepository({ApiClient? apiClient, TaskApiService? apiService})
       : apiService = apiService ??
-            TaskApiService(apiClient: apiClient ?? ApiClient());
+            TaskApiService(
+              apiClient: apiClient ??
+                  ApiClient(baseUrl: AppConstants.uatApiBaseUrl),
+            );
 
   @override
   Future<TaskResponse> getTasks({

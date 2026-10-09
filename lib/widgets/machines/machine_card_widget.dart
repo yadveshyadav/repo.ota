@@ -24,12 +24,17 @@ class MachineCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final modelCode = machine.modelCode ?? (machine.model.isNotEmpty ? machine.model : 'A600');
+    final modelCode =
+        machine.modelCode ??
+        (machine.model.isNotEmpty ? machine.model : 'A600');
     final isOnline = machine.isOnline;
     final isCommissioned = machine.isCommissioned == true;
     final fuelCardText = machine.fuelCardText;
     final runtime = machine.displayRuntime;
     final fuelPct = machine.fuelLevelPercent.clamp(0.0, 100.0);
+    final location = machine.location.trim().isEmpty
+        ? 'Location not available'
+        : machine.location.trim();
 
     Widget cardContent = Container(
       padding: const EdgeInsets.all(12),
@@ -134,7 +139,11 @@ class MachineCardWidget extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFD97706)),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 16,
+                    color: Color(0xFFD97706),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -144,7 +153,8 @@ class MachineCardWidget extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              '${topIssue!.isOem ? 'OEM Breakdown' : 'Ops Stop'} ${topIssue!.ttNumber ?? ''}'.trim(),
+                              '${topIssue!.isOem ? 'OEM Breakdown' : 'Ops Stop'} ${topIssue!.ttNumber ?? ''}'
+                                  .trim(),
                               style: const TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
@@ -152,9 +162,14 @@ class MachineCardWidget extends StatelessWidget {
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
-                                color: AppColors.criticalRed.withValues(alpha: 0.12),
+                                color: AppColors.criticalRed.withValues(
+                                  alpha: 0.12,
+                                ),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -200,18 +215,30 @@ class MachineCardWidget extends StatelessWidget {
               _AttributeChip(
                 icon: Icons.shield_outlined,
                 label: isCommissioned ? 'Commissioned' : 'Uncommissioned',
-                textColor: isCommissioned ? AppColors.successGreen : AppColors.mutedTextGray,
-                bgColor: (isCommissioned ? AppColors.successGreen : AppColors.mutedTextGray)
-                    .withValues(alpha: 0.1),
+                textColor: isCommissioned
+                    ? AppColors.successGreen
+                    : AppColors.mutedTextGray,
+                bgColor:
+                    (isCommissioned
+                            ? AppColors.successGreen
+                            : AppColors.mutedTextGray)
+                        .withValues(alpha: 0.1),
               ),
 
               // Operator Chip
               _AttributeChip(
                 icon: Icons.person_outline_rounded,
-                label: machine.hasOperator ? machine.operatorName : 'Not Assigned',
-                textColor: machine.hasOperator ? AppColors.movingBlue : AppColors.mutedTextGray,
-                bgColor: (machine.hasOperator ? AppColors.movingBlue : AppColors.mutedTextGray)
-                    .withValues(alpha: 0.1),
+                label: machine.hasOperator
+                    ? machine.operatorName
+                    : 'Not Assigned',
+                textColor: machine.hasOperator
+                    ? AppColors.movingBlue
+                    : AppColors.mutedTextGray,
+                bgColor:
+                    (machine.hasOperator
+                            ? AppColors.movingBlue
+                            : AppColors.mutedTextGray)
+                        .withValues(alpha: 0.1),
               ),
 
               // Fuel Card Chip in Grey
@@ -238,7 +265,7 @@ class MachineCardWidget extends StatelessWidget {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  machine.location,
+                  location,
                   style: const TextStyle(
                     fontSize: 11,
                     color: AppColors.deepNavy,
@@ -328,7 +355,9 @@ class MachineCardWidget extends StatelessWidget {
                       child: LinearProgressIndicator(
                         value: fuelPct / 100,
                         backgroundColor: AppColors.borderGray,
-                        color: fuelPct < 30 ? AppColors.warningAmber : AppColors.successGreen,
+                        color: fuelPct < 30
+                            ? AppColors.warningAmber
+                            : AppColors.successGreen,
                       ),
                     ),
                   ),
@@ -344,8 +373,9 @@ class MachineCardWidget extends StatelessWidget {
       return AnimatedBuilder(
         animation: blinkController!,
         builder: (context, child) {
-          final borderColor = AppColors.criticalRed
-              .withValues(alpha: 0.35 + (blinkController!.value * 0.55));
+          final borderColor = AppColors.criticalRed.withValues(
+            alpha: 0.35 + (blinkController!.value * 0.55),
+          );
           final bgColor = Color.lerp(
             AppColors.white,
             AppColors.criticalRed.withValues(alpha: 0.08),
@@ -386,7 +416,10 @@ class MachineCardWidget extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.criticalRed.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.6), width: 1.6),
+            border: Border.all(
+              color: AppColors.criticalRed.withValues(alpha: 0.6),
+              width: 1.6,
+            ),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x0A000000),
@@ -424,13 +457,17 @@ class _OperationalStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (hasOpenIssue) {
-      final badgeText = openCount > 1 ? 'UNDER BREAKDOWN ($openCount)' : 'UNDER BREAKDOWN';
+      final badgeText = openCount > 1
+          ? 'UNDER BREAKDOWN ($openCount)'
+          : 'UNDER BREAKDOWN';
       final badgeWidget = Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
         decoration: BoxDecoration(
           color: AppColors.criticalRed.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.35)),
+          border: Border.all(
+            color: AppColors.criticalRed.withValues(alpha: 0.35),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -472,7 +509,8 @@ class _OperationalStatusBadge extends StatelessWidget {
     if (statusLower.contains('idle')) {
       color = AppColors.movingBlue;
       label = 'Idle';
-    } else if (statusLower.contains('maintenance') || statusLower.contains('breakdown')) {
+    } else if (statusLower.contains('maintenance') ||
+        statusLower.contains('breakdown')) {
       color = AppColors.criticalRed;
       label = 'Maintenance';
     } else if (statusLower.contains('offline')) {
@@ -492,10 +530,7 @@ class _OperationalStatusBadge extends StatelessWidget {
           Container(
             width: 5,
             height: 5,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 4),
           Text(
@@ -534,10 +569,7 @@ class _OnlineBadge extends StatelessWidget {
           Container(
             width: 5,
             height: 5,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 4),
           Text(

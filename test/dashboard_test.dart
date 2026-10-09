@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hero_app/app/routes.dart';
 import 'package:hero_app/repositories/dashboard_repository.dart';
 import 'package:hero_app/screens/dashboard/dashboard_screen.dart';
 import 'package:hero_app/shared/widgets/skeleton_loader.dart';
@@ -9,14 +10,11 @@ import 'package:hero_app/widgets/dashboard/dashboard_sidebar.dart';
 import 'package:hero_app/widgets/dashboard/summary_card.dart';
 
 void main() {
-  testWidgets('Dashboard Screen renders all major cards and header/sidebar',
-      (WidgetTester tester) async {
+  testWidgets('Dashboard Screen renders all major cards and header/sidebar', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(
-      MaterialApp(
-        home: DashboardScreen(
-          repository: MockDashboardRepository(),
-        ),
-      ),
+      MaterialApp(home: DashboardScreen(repository: MockDashboardRepository())),
     );
 
     // Initial skeleton loading state
@@ -41,17 +39,14 @@ void main() {
     expect(find.text('Active alerts'), findsOneWidget);
   });
 
-  testWidgets('Desktop layout renders persistent sidebar',
-      (WidgetTester tester) async {
+  testWidgets('Desktop layout renders persistent sidebar', (
+    WidgetTester tester,
+  ) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1.0;
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: DashboardScreen(
-          repository: MockDashboardRepository(),
-        ),
-      ),
+      MaterialApp(home: DashboardScreen(repository: MockDashboardRepository())),
     );
 
     await tester.pump(const Duration(milliseconds: 800));
@@ -62,5 +57,29 @@ void main() {
 
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+  });
+
+  testWidgets('Dashboard breakdown card opens the breakdown management route', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DashboardScreen(repository: MockDashboardRepository()),
+        routes: {
+          AppRoutes.breakdowns: (_) => const Scaffold(
+            body: Center(child: Text('Breakdown route reached')),
+          ),
+        },
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pump(const Duration(milliseconds: 800));
+    expect(find.byType(SummaryCardsRow), findsOneWidget);
+    await tester.ensureVisible(find.text('BREAKDOWN'));
+    await tester.tap(find.text('BREAKDOWN'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Breakdown route reached'), findsOneWidget);
   });
 }

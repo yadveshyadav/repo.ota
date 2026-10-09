@@ -82,26 +82,49 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
               children: [
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 8,
+                    ),
                     children: [
                       for (final section in sections) ...[
                         // Section Header (Omitted if section is empty)
-                        if (!widget.isCollapsed && section.visibleItems.isNotEmpty)
+                        if (!widget.isCollapsed &&
+                            section.visibleItems.isNotEmpty)
                           _buildGroupHeader(section.title),
 
                         for (final item in section.visibleItems) ...[
                           _SidebarTile(
                             icon: item.icon,
                             title: item.title,
-                            isSelected: _activeItem == item.title ||
-                                (item.title == 'Machines' && (_activeItem == 'Machines' || _activeItem == 'Total Machines' || _activeItem == 'Online' || _activeItem == 'Offline' || _activeItem == 'Maintenance' || _activeItem == 'Commissioned' || _activeItem == 'Idle')) ||
-                                (item.title == 'Machine Shifting' && (_activeItem == 'Machine Shifting' || _activeItem == 'Machine Transfers' || _activeItem == 'Shifting' || _activeItem == 'Transfers')) ||
-                                (item.title == 'Live Tracking' && _activeItem == 'Live Status') ||
-                                (item.title == 'My Tasks' && _activeItem == 'Tasks') ||
-                                (item.title == 'Refuel Records' && _activeItem == 'Refuel') ||
-                                (item.title == 'Reports' && _activeItem == 'Report Center') ||
-                                (item.title == 'Alert Center' && _activeItem == 'Alerts') ||
-                                (item.title == 'Vendors' && (_activeItem == 'Partners' || _activeItem == 'Vendors & Partners')),
+                            isSelected:
+                                _activeItem == item.title ||
+                                (item.title == 'Machines' &&
+                                    (_activeItem == 'Machines' ||
+                                        _activeItem == 'Total Machines' ||
+                                        _activeItem == 'Online' ||
+                                        _activeItem == 'Offline' ||
+                                        _activeItem == 'Maintenance' ||
+                                        _activeItem == 'Commissioned' ||
+                                        _activeItem == 'Idle')) ||
+                                (item.title == 'Machine Shifting' &&
+                                    (_activeItem == 'Machine Shifting' ||
+                                        _activeItem == 'Machine Transfers' ||
+                                        _activeItem == 'Shifting' ||
+                                        _activeItem == 'Transfers')) ||
+                                (item.title == 'Live Tracking' &&
+                                    _activeItem == 'Live Status') ||
+                                (item.title == 'My Tasks' &&
+                                    _activeItem == 'Tasks') ||
+                                (item.title == 'Refuel Records' &&
+                                    _activeItem == 'Refuel') ||
+                                (item.title == 'Reports' &&
+                                    _activeItem == 'Report Center') ||
+                                (item.title == 'Alert Center' &&
+                                    _activeItem == 'Alerts') ||
+                                (item.title == 'Vendors' &&
+                                    (_activeItem == 'Partners' ||
+                                        _activeItem == 'Vendors & Partners')),
                             isCollapsed: widget.isCollapsed,
                             onTap: () => _selectItem(item.title),
                           ),
@@ -114,25 +137,44 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
                 ),
                 const Divider(height: 1, color: AppColors.borderGray),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12.0,
+                    vertical: 10.0,
+                  ),
                   child: widget.isCollapsed
-                      ? const Icon(Icons.shield_outlined,
-                          size: 18, color: AppColors.mutedTextGray)
+                      ? const Icon(
+                          Icons.shield_outlined,
+                          size: 18,
+                          color: AppColors.mutedTextGray,
+                        )
                       : Row(
                           children: [
-                            const Icon(Icons.shield_outlined,
-                                size: 16, color: AppColors.mutedTextGray),
+                            const Icon(
+                              Icons.shield_outlined,
+                              size: 16,
+                              color: AppColors.mutedTextGray,
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                user != null ? '${user.role} Portal' : 'VehicleIQ Platform v1.0',
+                                user != null
+                                    ? '${user.role} Portal'
+                                    : 'VehicleIQ Platform v1.0',
                                 style: AppTextStyles.caption,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             InkWell(
-                              onTap: () => OtaUpdateDialogs.performAppUpdateCheck(context, isManualCheck: true),
-                              child: const Icon(Icons.system_update_rounded, size: 16, color: AppColors.primaryGreen),
+                              onTap: () =>
+                                  OtaUpdateDialogs.performAppUpdateCheck(
+                                    context,
+                                    isManualCheck: true,
+                                  ),
+                              child: const Icon(
+                                Icons.system_update_rounded,
+                                size: 16,
+                                color: AppColors.primaryGreen,
+                              ),
                             ),
                           ],
                         ),
@@ -194,6 +236,16 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
             title: 'My Tasks',
             permission: 'tasks.view',
             icon: Icons.assignment_outlined,
+          ),
+          _NavItemData(
+            title: 'Hindrance',
+            permission: 'tasks.view',
+            icon: Icons.report_problem_outlined,
+          ),
+          _NavItemData(
+            title: 'CCN',
+            permission: 'tasks.view',
+            icon: Icons.route_outlined,
           ),
           _NavItemData(
             title: 'Team',
@@ -308,19 +360,24 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
     final bool isVendorUser = user != null && user.isVendorUser;
 
     // Filter sections and items dynamically based on auth.can(permission)
-    return allSections.map((section) {
-      final visible = section.items.where((item) {
-        if (isVendorUser && (item.title == 'Machine Shifting' || item.title == 'Transfers')) {
-          return false;
-        }
-        return auth.can(item.permission);
-      }).toList();
-      return _NavSectionData(
-        title: section.title,
-        items: section.items,
-        visibleItems: visible,
-      );
-    }).where((section) => section.visibleItems.isNotEmpty).toList();
+    return allSections
+        .map((section) {
+          final visible = section.items.where((item) {
+            if (isVendorUser &&
+                (item.title == 'Machine Shifting' ||
+                    item.title == 'Transfers')) {
+              return false;
+            }
+            return auth.can(item.permission);
+          }).toList();
+          return _NavSectionData(
+            title: section.title,
+            items: section.items,
+            visibleItems: visible,
+          );
+        })
+        .where((section) => section.visibleItems.isNotEmpty)
+        .toList();
   }
 }
 
@@ -368,10 +425,10 @@ class _SidebarTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bgColor = isSelected ? AppColors.lightGreenBg : Colors.transparent;
-    final iconColor =
-        isSelected ? AppColors.primaryGreen : AppColors.mutedTextGray;
-    final textColor =
-        isSelected ? AppColors.primaryGreen : AppColors.deepNavy;
+    final iconColor = isSelected
+        ? AppColors.primaryGreen
+        : AppColors.mutedTextGray;
+    final textColor = isSelected ? AppColors.primaryGreen : AppColors.deepNavy;
 
     final content = Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -393,8 +450,9 @@ class _SidebarTile extends StatelessWidget {
                 : null,
           ),
           child: Row(
-            mainAxisAlignment:
-                isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+            mainAxisAlignment: isCollapsed
+                ? MainAxisAlignment.center
+                : MainAxisAlignment.start,
             children: [
               Icon(icon, color: iconColor, size: 18),
               if (!isCollapsed) ...[
@@ -404,8 +462,9 @@ class _SidebarTile extends StatelessWidget {
                     title,
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.w500,
                       color: textColor,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -413,8 +472,10 @@ class _SidebarTile extends StatelessWidget {
                 ),
                 if (badge != null)
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.primaryGreen,
                       borderRadius: BorderRadius.circular(10),
@@ -436,11 +497,7 @@ class _SidebarTile extends StatelessWidget {
     );
 
     if (isCollapsed) {
-      return Tooltip(
-        message: title,
-        preferBelow: false,
-        child: content,
-      );
+      return Tooltip(message: title, preferBelow: false, child: content);
     }
 
     return content;

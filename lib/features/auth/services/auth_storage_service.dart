@@ -13,6 +13,8 @@ class AuthStorageService {
   AuthStorageService._internal();
 
   static const String _keyAccessToken = 'hero_access_token';
+  static const String _keyUatTaskAccessToken = 'uat_task_access_token';
+  static const String _keyDevTaskAccessToken = 'dev_task_access_token';
   static const String _keyRefreshToken = 'hero_refresh_token';
   static const String _keyUserJson = 'hero_user_json';
   static const String _keyLastActiveAt = 'hero_last_active_at';
@@ -22,6 +24,8 @@ class AuthStorageService {
   static const Duration maxInactivityDuration = Duration(days: 10);
 
   String? _accessToken;
+  String? _uatTaskAccessToken;
+  String? _devTaskAccessToken;
   String? _refreshToken;
   UserModel? _currentUser;
   DateTime? _lastActiveAt;
@@ -29,13 +33,18 @@ class AuthStorageService {
   bool _isInitialized = false;
 
   String? get accessToken => _accessToken;
+  String? get uatTaskAccessToken => _uatTaskAccessToken;
+  String? get devTaskAccessToken => _devTaskAccessToken;
   String? get refreshToken => _refreshToken;
   UserModel? get currentUser => _currentUser;
   DateTime? get lastActiveAt => _lastActiveAt;
 
   /// Returns true if session exists, user is authenticated, and inactivity duration < 10 days
   bool get isLoggedIn {
-    if (!_isLoggedIn || _accessToken == null || _accessToken!.isEmpty || _currentUser == null) {
+    if (!_isLoggedIn ||
+        _accessToken == null ||
+        _accessToken!.isEmpty ||
+        _currentUser == null) {
       return false;
     }
     return !isSessionExpiredByInactivity;
@@ -57,6 +66,8 @@ class AuthStorageService {
 
       final savedLoggedIn = prefs.getBool(_keyIsLoggedIn) ?? false;
       final savedToken = prefs.getString(_keyAccessToken);
+      _uatTaskAccessToken = prefs.getString(_keyUatTaskAccessToken);
+      _devTaskAccessToken = prefs.getString(_keyDevTaskAccessToken);
       final savedRefreshToken = prefs.getString(_keyRefreshToken);
       final savedUserJson = prefs.getString(_keyUserJson);
       final savedLastActiveStr = prefs.getString(_keyLastActiveAt);
@@ -96,14 +107,18 @@ class AuthStorageService {
         if (isSessionExpiredByInactivity) {
           final daysInactive = DateTime.now().difference(_lastActiveAt!).inDays;
           if (kDebugMode) {
-            print('[AuthStorageService] Session expired due to $daysInactive days of inactivity (>= 10 days). Clearing session.');
+            print(
+              '[AuthStorageService] Session expired due to $daysInactive days of inactivity (>= 10 days). Clearing session.',
+            );
           }
           await clearSession();
         } else {
           // Session is valid! Touch lastActiveAt to reset 10-day inactivity timer for latest opening
           await touchLastActive();
           if (kDebugMode) {
-            print('[AuthStorageService] Restored valid session for ${_currentUser?.fullName}. Updated lastActiveAt to ${DateTime.now()}.');
+            print(
+              '[AuthStorageService] Restored valid session for ${_currentUser?.fullName}. Updated lastActiveAt to ${DateTime.now()}.',
+            );
           }
         }
       } else {
@@ -119,20 +134,14 @@ class AuthStorageService {
   }
 
   /// Save active session details upon successful authentication
-  Future<void> saveSession({
-    required AuthToken token,
-    UserModel? user,
-  }) async {
+  Future<void> saveSession({required AuthToken token, UserModel? user}) async {
     final now = DateTime.now();
 
     _accessToken = token.accessToken;
     _refreshToken = token.refreshToken;
-    _currentUser = user ??
-        const UserModel(
-          id: '1',
-          username: 'admin',
-          email: 'admin@hero.com',
-        );
+    _currentUser =
+        user ??
+        const UserModel(id: '1', username: 'admin', email: 'admin@hero.com');
     _lastActiveAt = now;
     _isLoggedIn = true;
 
@@ -165,6 +174,18 @@ class AuthStorageService {
     }
   }
 
+  Future<void> saveUatTaskAccessToken(String token) async {
+    _uatTaskAccessToken = token;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyUatTaskAccessToken, token);
+  }
+
+  Future<void> saveDevTaskAccessToken(String token) async {
+    _devTaskAccessToken = token;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyDevTaskAccessToken, token);
+  }
+
   /// Update current user profile
   Future<void> updateUser(UserModel user) async {
     _currentUser = user;
@@ -181,6 +202,8 @@ class AuthStorageService {
   /// Clear all stored tokens and session data on explicit logout or 10-day inactivity expiration
   Future<void> clearSession() async {
     _accessToken = null;
+    _uatTaskAccessToken = null;
+    _devTaskAccessToken = null;
     _refreshToken = null;
     _currentUser = null;
     _lastActiveAt = null;
@@ -192,6 +215,8 @@ class AuthStorageService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_keyAccessToken);
+      await prefs.remove(_keyUatTaskAccessToken);
+      await prefs.remove(_keyDevTaskAccessToken);
       await prefs.remove(_keyRefreshToken);
       await prefs.remove(_keyUserJson);
       await prefs.remove(_keyLastActiveAt);

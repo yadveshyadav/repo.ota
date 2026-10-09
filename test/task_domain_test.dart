@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hero_app/core/utils/date_parser_utils.dart';
+import 'package:hero_app/features/hindrance/data/hindrance_task_data_source.dart';
 import 'package:hero_app/models/task_execution_model.dart';
 import 'package:hero_app/models/task_media_model.dart';
 import 'package:hero_app/models/task_model.dart';
@@ -155,6 +156,166 @@ void main() {
       expect(task.completedScope, 0.0);
       expect(task.progress, 0.0);
       expect(task.createdAt, isNull);
+    });
+  });
+
+  group('TaskModel Master Data Parsing Tests', () {
+    test('Maps embedded trenching routes to Rings with selectable Segments', () {
+      const block = TaskModel(
+        id: 'block-1',
+        taskCode: 'TASK-1',
+        displayName: 'Block One',
+        taskType: hindranceHierarchyTaskType,
+        status: 'ASSIGNED',
+        approvalStatus: 'APPROVED',
+        legacyRoutes: [
+          TaskRouteModel(
+            taskId: 'ring-task-id',
+            routeCode: 'R01',
+            routeName: 'Ring One',
+            distanceKm: 2.5,
+            segmentsCount: 1,
+            startNode: 'GP A',
+            targetNode: 'GP B',
+            segments: [
+              TaskSegmentModel(
+                taskId: 'segment-task-id',
+                segmentCode: 'R01-S01',
+                startNode: 'GP A',
+                targetNode: 'GP B',
+                distanceKm: 2.5,
+              ),
+            ],
+          ),
+        ],
+      );
+
+      expect(HindranceTaskDataSource.isBlockTask(block), isTrue);
+      final rings = HindranceTaskDataSource.ringsForBlock(block, [block]);
+      expect(rings, hasLength(1));
+      expect(rings.single.id, 'ring-task-id');
+      expect(rings.single.displayName, 'Ring One');
+      expect(rings.single.parentTaskId, block.id);
+      expect(rings.single.routeSnapshot?.segments.single.segmentCode, 'R01-S01');
+      expect(rings.single.routeSnapshot?.segments.single.taskId, 'segment-task-id');
+    });
+
+    test('Parses UAT Block to Ring to nested Segment route snapshots', () {
+      final block = TaskModel.fromJson({
+        'id': 'block-uat',
+        'taskCode': 'TASK-2026-57762',
+        'displayName': 'GANGANAGAR',
+        'taskType': hindranceHierarchyTaskType,
+        'status': 'CREATED',
+        'approvalStatus': 'PENDING',
+        'routeSnapshot': {
+          'level': 'BLOCK',
+          'routes': [
+            {
+              'level': 'RING',
+              'routeName': 'R1',
+              'routeCode': 'RING-R1',
+              'lengthKm': 3.6,
+              'routes': [
+                {
+                  'id': 'segment-task-001',
+                  'routeId': 'ring-id',
+                  'level': 'SEGMENT',
+                  'segmentCode': 'SEG-001',
+                  'routeName': 'R1',
+                  'lengthKm': 1.8,
+                  'currentNode': {'code': 'BHQ', 'lat': 29.24, 'lng': 73.52},
+                  'nextNode': {'code': 'JC001', 'lat': 29.23, 'lng': 73.51},
+                },
+                {
+                  'id': 'segment-task-002',
+                  'routeId': 'ring-id',
+                  'level': 'SEGMENT',
+                  'segmentCode': 'SEG-002',
+                  'routeName': 'R1',
+                  'lengthKm': 1.8,
+                  'currentNode': {'code': 'JC001'},
+                  'nextNode': {'code': 'JC002'},
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      final rings = HindranceTaskDataSource.ringsForBlock(block, [block]);
+      expect(rings, hasLength(1));
+      expect(rings.single.displayName, 'R1');
+      final segments = HindranceTaskDataSource.segmentsForRing(
+        rings.single,
+        [block],
+      );
+      expect(segments.map((segment) => segment.taskCode), ['SEG-001', 'SEG-002']);
+      expect(segments.map((segment) => segment.id), [
+        'segment-task-001',
+        'segment-task-002',
+      ]);
+      expect(segments.map((segment) => segment.routeSnapshot?.routeCode), [
+        'SEG-001',
+        'SEG-002',
+      ]);
+      expect(rings.single.routeSnapshot?.segments.map((s) => s.startNode), [
+        'BHQ',
+        'JC001',
+      ]);
+      expect(rings.single.routeSnapshot?.segments.first.startLat, 29.24);
+      expect(rings.single.routeSnapshot?.segments.first.targetLng, 73.51);
+    });
+
+    test('Uses real Block, Ring, and Segment task IDs from the hierarchy', () {
+      const block = TaskModel(
+        id: 'block-id',
+        taskCode: 'TASK-2026-57710',
+        displayName: 'BHERUNDA',
+        taskType: hindranceHierarchyTaskType,
+        taskLevel: 'BLOCK',
+        taskLevelProvided: true,
+        status: 'CREATED',
+        approvalStatus: 'PENDING',
+      );
+      const ring = TaskModel(
+        id: 'ring-id',
+        taskCode: 'TASK-2026-57711',
+        displayName: 'R01',
+        taskType: hindranceHierarchyTaskType,
+        taskLevel: 'RING',
+        taskLevelProvided: true,
+        status: 'CREATED',
+        approvalStatus: 'PENDING',
+        parentTaskId: 'block-id',
+      );
+      const segment = TaskModel(
+        id: 'segment-id',
+        taskCode: 'TASK-2026-57712',
+        displayName: 'BHERUNDA - JC0002',
+        taskType: hindranceHierarchyTaskType,
+        taskLevel: 'SEGMENT',
+        taskLevelProvided: true,
+        status: 'CREATED',
+        approvalStatus: 'PENDING',
+        parentTaskId: 'ring-id',
+      );
+
+      expect(HindranceTaskDataSource.isBlockTask(block), isTrue);
+      expect(HindranceTaskDataSource.isBlockTask(ring), isFalse);
+      expect(HindranceTaskDataSource.isBlockTask(segment), isFalse);
+      final rings = HindranceTaskDataSource.ringsForBlock(
+        block,
+        [block, ring, segment],
+      );
+      expect(rings.single.id, 'ring-id');
+      final segments = HindranceTaskDataSource.segmentsForRing(
+        ring,
+        [block, ring, segment],
+      );
+      expect(segments.single.id, 'segment-id');
+      expect(segments.single.displayName, 'BHERUNDA - JC0002');
+      expect(segments.single.taskCode, 'TASK-2026-57712');
     });
   });
 

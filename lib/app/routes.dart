@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:hero_app/features/auth/presentation/screens/login_screen.dart';
 import 'package:hero_app/features/auth/presentation/screens/splash_screen.dart';
 import 'package:hero_app/features/expenses/screens/expense_dashboard_screen.dart';
+import 'package:hero_app/features/hindrance/screens/hindrance_screen.dart';
+import 'package:hero_app/features/hindrance/screens/ccn_workflow_screen.dart';
 import 'package:hero_app/features/inventory/screens/inventory_overview_screen.dart';
 import 'package:hero_app/features/live_status/screens/live_status_screen.dart';
 import 'package:hero_app/features/tasks/screens/task_detail_screen.dart';
@@ -38,6 +40,8 @@ abstract class AppRoutes {
   static const String liveStatus = '/live-status';
   static const String vendors = '/vendors';
   static const String tasks = '/tasks';
+  static const String hindrance = '/hindrance';
+  static const String ccn = '/ccn';
   static const String taskDetail = '/task-detail';
   static const String team = '/team';
   static const String users = '/users';
@@ -59,83 +63,91 @@ abstract class AppRoutes {
   static const String settings = '/settings';
 
   static Map<String, WidgetBuilder> get routes => {
-        splash: (context) => const SplashScreen(),
-        login: (context) => const LoginScreen(),
-        dashboard: (context) => _guardRoute(
-              permission: 'dashboard.view',
-              builder: (ctx) => const DashboardScreen(),
-            )(context),
-        machines: (context) => _guardRoute(
-              permission: 'machines.view',
-              builder: (ctx) => const MachineListScreen(),
-            )(context),
-        liveStatus: (context) => _guardRoute(
-              permission: 'tracking.view',
-              builder: (ctx) => const LiveStatusScreen(),
-            )(context),
-        vendors: (context) => _guardRoute(
-              permission: 'vendors.view',
-              builder: (ctx) => const VendorsScreen(),
-            )(context),
-        tasks: (context) => _guardRoute(
-              permission: 'tasks.view',
-              builder: (ctx) => const TasksScreen(),
-            )(context),
-        team: (context) => _guardRoute(
-              permission: 'team.view',
-              builder: (ctx) => const TeamScreen(),
-            )(context),
-        users: (context) => _guardRoute(
-              permission: 'users.view',
-              builder: (ctx) => const UsersScreen(),
-            )(context),
-        roles: (context) => _guardRoute(
-              permission: 'roles.view',
-              builder: (ctx) => const RolesPermissionsScreen(),
-            )(context),
-        attendance: (context) => _guardRoute(
-              permission: 'attendance.view',
-              builder: (ctx) => const AttendanceScreen(),
-            )(context),
-        inventory: (context) => _guardRoute(
-              permission: 'inventory.view',
-              builder: (ctx) => const StockInventoryOverviewScreen(),
-            )(context),
-        expenses: (context) => _guardRoute(
-              permission: 'expenses.view',
-              builder: (ctx) => const ExpenseDashboardScreen(),
-            )(context),
-        notifications: (context) => const NotificationScreen(),
-        alerts: (context) => const AlertsScreen(),
-        breakdowns: (context) => _guardRoute(
-              permission: 'breakdowns.view',
-              builder: (ctx) => const BreakdownMachinesScreen(),
-            )(context),
-        refuel: (context) => _guardRoute(
-              permission: 'refuel.view',
-              builder: (ctx) => const RefuelHistoryScreen(),
-            )(context),
-        machineTransfers: (context) {
-          final user = AuthStorageService().currentUser;
-          if (user != null && user.isVendorUser) {
-            return const ForbiddenScreen(routeName: 'Machine Shifting');
-          }
-          return _guardRoute(
-            permission: 'machines.view',
-            builder: (ctx) => const MachineTransfersListScreen(),
-          )(context);
-        },
-        machineTransferFlow: (context) {
-          final user = AuthStorageService().currentUser;
-          if (user != null && user.isVendorUser) {
-            return const ForbiddenScreen(routeName: 'Machine Shifting');
-          }
-          return _guardRoute(
-            permission: 'machines.view',
-            builder: (ctx) => const MachineTransferFlowScreen(),
-          )(context);
-        },
-      };
+    splash: (context) => const SplashScreen(),
+    login: (context) => const LoginScreen(),
+    dashboard: (context) => _guardRoute(
+      permission: 'dashboard.view',
+      builder: (ctx) => const DashboardScreen(),
+    )(context),
+    machines: (context) => _guardRoute(
+      permission: 'machines.view',
+      builder: (ctx) => const MachineListScreen(),
+    )(context),
+    liveStatus: (context) => _guardRoute(
+      permission: 'tracking.view',
+      builder: (ctx) => const LiveStatusScreen(),
+    )(context),
+    vendors: (context) => _guardRoute(
+      permission: 'vendors.view',
+      builder: (ctx) => const VendorsScreen(),
+    )(context),
+    tasks: (context) => _guardRoute(
+      permission: 'tasks.view',
+      builder: (ctx) => const TasksScreen(),
+    )(context),
+    hindrance: (context) => _guardRoute(
+      permission: 'tasks.view',
+      builder: (ctx) => const HindranceScreen(),
+    )(context),
+    ccn: (context) => _guardRoute(
+      permission: 'tasks.view',
+      builder: (ctx) => const CcnWorkflowScreen(),
+    )(context),
+    team: (context) => _guardRoute(
+      permission: 'team.view',
+      builder: (ctx) => const TeamScreen(),
+    )(context),
+    users: (context) => _guardRoute(
+      permission: 'users.view',
+      builder: (ctx) => const UsersScreen(),
+    )(context),
+    roles: (context) => _guardRoute(
+      permission: 'roles.view',
+      builder: (ctx) => const RolesPermissionsScreen(),
+    )(context),
+    attendance: (context) => _guardRoute(
+      permission: 'attendance.view',
+      builder: (ctx) => const AttendanceScreen(),
+    )(context),
+    inventory: (context) => _guardRoute(
+      permission: 'inventory.view',
+      builder: (ctx) => const StockInventoryOverviewScreen(),
+    )(context),
+    expenses: (context) => _guardRoute(
+      permission: 'expenses.view',
+      builder: (ctx) => const ExpenseDashboardScreen(),
+    )(context),
+    notifications: (context) => const NotificationScreen(),
+    alerts: (context) => const AlertsScreen(),
+    breakdowns: (context) => _guardRoute(
+      permission: 'breakdowns.view',
+      builder: (ctx) => const BreakdownMachinesScreen(),
+    )(context),
+    refuel: (context) => _guardRoute(
+      permission: 'refuel.view',
+      builder: (ctx) => const RefuelHistoryScreen(),
+    )(context),
+    machineTransfers: (context) {
+      final user = AuthStorageService().currentUser;
+      if (user != null && user.isVendorUser) {
+        return const ForbiddenScreen(routeName: 'Machine Shifting');
+      }
+      return _guardRoute(
+        permission: 'machines.view',
+        builder: (ctx) => const MachineTransfersListScreen(),
+      )(context);
+    },
+    machineTransferFlow: (context) {
+      final user = AuthStorageService().currentUser;
+      if (user != null && user.isVendorUser) {
+        return const ForbiddenScreen(routeName: 'Machine Shifting');
+      }
+      return _guardRoute(
+        permission: 'machines.view',
+        builder: (ctx) => const MachineTransferFlowScreen(),
+      )(context);
+    },
+  };
 
   static WidgetBuilder _guardRoute({
     required String permission,
@@ -189,6 +201,18 @@ abstract class AppRoutes {
         return _buildGuardedPageRoute(
           permission: 'tasks.view',
           builder: (_) => const TasksScreen(),
+          settings: settings,
+        );
+      case hindrance:
+        return _buildGuardedPageRoute(
+          permission: 'tasks.view',
+          builder: (_) => const HindranceScreen(),
+          settings: settings,
+        );
+      case ccn:
+        return _buildGuardedPageRoute(
+          permission: 'tasks.view',
+          builder: (_) => const CcnWorkflowScreen(),
           settings: settings,
         );
       case taskDetail:

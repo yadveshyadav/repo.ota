@@ -4,6 +4,7 @@ import 'task_master_snapshots.dart';
 
 /// Data model representing a Task Segment entity
 class TaskSegmentModel {
+  final String? taskId;
   final String segmentCode;
   final String startNode;
   final String targetNode;
@@ -14,6 +15,7 @@ class TaskSegmentModel {
   final double? targetLng;
 
   const TaskSegmentModel({
+    this.taskId,
     required this.segmentCode,
     required this.startNode,
     required this.targetNode,
@@ -41,10 +43,22 @@ class TaskSegmentModel {
     }
 
     return TaskSegmentModel(
-      segmentCode: (json['segmentCode'] ?? json['code'] ?? json['segment_code'] ?? 'SEG-01').toString(),
-      startNode: (json['startNode'] ?? json['start_node'] ?? 'Start Node').toString(),
-      targetNode: (json['targetNode'] ?? json['target_node'] ?? 'Target Node').toString(),
-      distanceKm: parseCoord(json['distanceKm'] ?? json['distance_km'] ?? json['distance']) ?? 0.0,
+      taskId: (json['taskId'] ?? json['task_id'] ?? json['id'])?.toString(),
+      segmentCode:
+          (json['segmentCode'] ??
+                  json['code'] ??
+                  json['segment_code'] ??
+                  'SEG-01')
+              .toString(),
+      startNode: (json['startNode'] ?? json['start_node'] ?? 'Start Node')
+          .toString(),
+      targetNode: (json['targetNode'] ?? json['target_node'] ?? 'Target Node')
+          .toString(),
+      distanceKm:
+          parseCoord(
+            json['distanceKm'] ?? json['distance_km'] ?? json['distance'],
+          ) ??
+          0.0,
       startLat: parseCoord(json['startLat'] ?? json['start_lat']),
       startLng: parseCoord(json['startLng'] ?? json['start_lng']),
       targetLat: parseCoord(json['targetLat'] ?? json['target_lat']),
@@ -53,36 +67,55 @@ class TaskSegmentModel {
   }
 
   Map<String, dynamic> toJson() => {
-        'segmentCode': segmentCode,
-        'startNode': startNode,
-        'targetNode': targetNode,
-        'distanceKm': distanceKm,
-        if (startLat != null) 'startLat': startLat,
-        if (startLng != null) 'startLng': startLng,
-        if (targetLat != null) 'targetLat': targetLat,
-        if (targetLng != null) 'targetLng': targetLng,
-      };
+    if (taskId != null && taskId!.isNotEmpty) 'taskId': taskId,
+    'segmentCode': segmentCode,
+    'startNode': startNode,
+    'targetNode': targetNode,
+    'distanceKm': distanceKm,
+    if (startLat != null) 'startLat': startLat,
+    if (startLng != null) 'startLng': startLng,
+    if (targetLat != null) 'targetLat': targetLat,
+    if (targetLng != null) 'targetLng': targetLng,
+  };
 }
 
 /// Data model representing a Route in the Task Hierarchy
 class TaskRouteModel {
+  final String? taskId;
+  final String? planId;
+  final String level;
+  final String segmentCode;
   final String routeCode;
   final String routeName;
   final double distanceKm;
   final int segmentsCount;
   final String startNode;
   final String targetNode;
+  final double? startLat;
+  final double? startLng;
+  final double? targetLat;
+  final double? targetLng;
   final List<TaskSegmentModel> segments;
+  final List<TaskRouteModel> childRoutes;
   final List<List<double>>? polylineCoordinates;
 
   const TaskRouteModel({
+    this.taskId,
+    this.planId,
+    this.level = '',
+    this.segmentCode = '',
     required this.routeCode,
     required this.routeName,
     required this.distanceKm,
     required this.segmentsCount,
     required this.startNode,
     required this.targetNode,
+    this.startLat,
+    this.startLng,
+    this.targetLat,
+    this.targetLng,
     this.segments = const [],
+    this.childRoutes = const [],
     this.polylineCoordinates,
   });
 
@@ -98,11 +131,22 @@ class TaskRouteModel {
       );
     }
 
-    final segList = (json['segments'] as List<dynamic>?)
+    final segList =
+        (json['segments'] as List<dynamic>?)
             ?.whereType<Map<String, dynamic>>()
             .map((s) => TaskSegmentModel.fromJson(s))
             .toList() ??
         const [];
+    final children =
+        (json['routes'] as List<dynamic>?)
+            ?.whereType<Map<String, dynamic>>()
+            .map(TaskRouteModel.fromJson)
+            .toList() ??
+        const <TaskRouteModel>[];
+    Map<String, dynamic>? node(dynamic value) =>
+        value is Map<String, dynamic> ? value : null;
+    final currentNode = node(json['currentNode'] ?? json['startNode']);
+    final nextNode = node(json['nextNode'] ?? json['targetNode']);
 
     double? parseNum(dynamic val) {
       if (val == null) return null;
@@ -114,34 +158,103 @@ class TaskRouteModel {
     if (json['polylineCoordinates'] is List) {
       coords = (json['polylineCoordinates'] as List)
           .whereType<List>()
-          .map((item) => item.map((e) => (e is num) ? e.toDouble() : 0.0).toList())
+          .map(
+            (item) => item.map((e) => (e is num) ? e.toDouble() : 0.0).toList(),
+          )
           .toList();
     }
 
     return TaskRouteModel(
-      routeCode: (json['routeCode'] ?? json['code'] ?? json['route_code'] ?? 'R01').toString(),
-      routeName: (json['routeName'] ?? json['name'] ?? json['route_name'] ?? 'Route 01').toString(),
-      distanceKm: parseNum(json['distanceKm'] ?? json['distance_km'] ?? json['distance']) ?? 0.0,
-      segmentsCount: (json['segmentsCount'] ?? json['segments_count'] ?? segList.length) is int
-          ? (json['segmentsCount'] ?? json['segments_count'] ?? segList.length)
-          : int.tryParse('${json['segmentsCount'] ?? json['segments_count'] ?? segList.length}') ?? segList.length,
-      startNode: (json['startNode'] ?? json['start_node'] ?? 'Start Node').toString(),
-      targetNode: (json['targetNode'] ?? json['target_node'] ?? 'Target Node').toString(),
+      // Some API responses repeat `routeId` on every segment. It identifies
+      // the parent route in that shape, so it is not a segment task ID.
+      taskId:
+          (json['taskId'] ??
+                  json['task_id'] ??
+                  json['id'] ??
+                  ((json['level']?.toString().toUpperCase() == 'SEGMENT')
+                      ? null
+                      : json['routeId']))
+              ?.toString(),
+      planId: (json['planId'] ?? json['plan_id'])?.toString(),
+      level: (json['level'] ?? '').toString(),
+      segmentCode: (json['segmentCode'] ?? json['segment_code'] ?? '')
+          .toString(),
+      routeCode:
+          (json['routeCode'] ??
+                  json['code'] ??
+                  json['route_code'] ??
+                  json['label'] ??
+                  'R01')
+              .toString(),
+      routeName:
+          (json['routeName'] ??
+                  json['name'] ??
+                  json['route_name'] ??
+                  json['label'] ??
+                  'Route 01')
+              .toString(),
+      distanceKm:
+          parseNum(
+            json['distanceKm'] ??
+                json['distance_km'] ??
+                json['lengthKm'] ??
+                json['length_km'] ??
+                json['distance'],
+          ) ??
+          0.0,
+      segmentsCount:
+          (json['segmentsCount'] ??
+                  json['segments_count'] ??
+                  (children.isNotEmpty ? children.length : segList.length))
+              is int
+          ? (json['segmentsCount'] ??
+                json['segments_count'] ??
+                (children.isNotEmpty ? children.length : segList.length))
+          : int.tryParse(
+                  '${json['segmentsCount'] ?? json['segments_count'] ?? (children.isNotEmpty ? children.length : segList.length)}',
+                ) ??
+                (children.isNotEmpty ? children.length : segList.length),
+      startNode:
+          (currentNode?['name'] ??
+                  currentNode?['code'] ??
+                  json['start_node'] ??
+                  'Start Node')
+              .toString(),
+      targetNode:
+          (nextNode?['name'] ??
+                  nextNode?['code'] ??
+                  json['target_node'] ??
+                  'Target Node')
+              .toString(),
+      startLat: parseNum(currentNode?['lat'] ?? currentNode?['latitude']),
+      startLng: parseNum(currentNode?['lng'] ?? currentNode?['longitude']),
+      targetLat: parseNum(nextNode?['lat'] ?? nextNode?['latitude']),
+      targetLng: parseNum(nextNode?['lng'] ?? nextNode?['longitude']),
       segments: segList,
+      childRoutes: children,
       polylineCoordinates: coords,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'routeCode': routeCode,
-        'routeName': routeName,
-        'distanceKm': distanceKm,
-        'segmentsCount': segmentsCount,
-        'startNode': startNode,
-        'targetNode': targetNode,
-        'segments': segments.map((s) => s.toJson()).toList(),
-        if (polylineCoordinates != null) 'polylineCoordinates': polylineCoordinates,
-      };
+    if (taskId != null && taskId!.isNotEmpty) 'taskId': taskId,
+    if (planId != null && planId!.isNotEmpty) 'planId': planId,
+    'routeCode': routeCode,
+    if (level.isNotEmpty) 'level': level,
+    if (segmentCode.isNotEmpty) 'segmentCode': segmentCode,
+    'routeName': routeName,
+    'distanceKm': distanceKm,
+    'segmentsCount': segmentsCount,
+    'startNode': startNode,
+    'targetNode': targetNode,
+    if (startLat != null) 'startLat': startLat,
+    if (startLng != null) 'startLng': startLng,
+    if (targetLat != null) 'targetLat': targetLat,
+    if (targetLng != null) 'targetLng': targetLng,
+    'segments': segments.map((s) => s.toJson()).toList(),
+    'routes': childRoutes.map((route) => route.toJson()).toList(),
+    if (polylineCoordinates != null) 'polylineCoordinates': polylineCoordinates,
+  };
 }
 
 /// Data model for Network & Telemetry Attributes
@@ -165,18 +278,24 @@ class TaskTelemetryModel {
       );
     }
     return TaskTelemetryModel(
-      oltIp: (json['oltIp'] ?? json['olt_ip'] ?? json['ip'] ?? '10.0.183.2').toString(),
-      baCmp: (json['baCmp'] ?? json['ba_cmp'] ?? json['ba'] ?? 'BA-CMP-01').toString(),
+      oltIp: (json['oltIp'] ?? json['olt_ip'] ?? json['ip'] ?? '10.0.183.2')
+          .toString(),
+      baCmp: (json['baCmp'] ?? json['ba_cmp'] ?? json['ba'] ?? 'BA-CMP-01')
+          .toString(),
       companyPhase:
-          (json['companyPhase'] ?? json['company_phase'] ?? json['phase'] ?? 'HERO Infra Phase 2').toString(),
+          (json['companyPhase'] ??
+                  json['company_phase'] ??
+                  json['phase'] ??
+                  'HERO Infra Phase 2')
+              .toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'oltIp': oltIp,
-        'baCmp': baCmp,
-        'companyPhase': companyPhase,
-      };
+    'oltIp': oltIp,
+    'baCmp': baCmp,
+    'companyPhase': companyPhase,
+  };
 }
 
 /// Data model for Pit & Telemetry item
@@ -216,12 +335,12 @@ class TaskPitModel {
   }
 
   Map<String, dynamic> toJson() => {
-        'pitId': pitId,
-        'pitName': pitName,
-        'pitType': pitType,
-        if (latitude != null) 'latitude': latitude,
-        if (longitude != null) 'longitude': longitude,
-      };
+    'pitId': pitId,
+    'pitName': pitName,
+    'pitType': pitType,
+    if (latitude != null) 'latitude': latitude,
+    if (longitude != null) 'longitude': longitude,
+  };
 }
 
 /// Primary strongly typed Task Master Model driven by API response
@@ -231,6 +350,7 @@ class TaskModel {
   final String displayName;
   final String taskType;
   final String taskLevel;
+  final bool taskLevelProvided;
   final String status;
   final String taskStage;
   final String approvalStatus;
@@ -310,6 +430,7 @@ class TaskModel {
     required this.displayName,
     required this.taskType,
     this.taskLevel = 'BLOCK',
+    this.taskLevelProvided = false,
     required this.status,
     this.taskStage = 'PLANNING',
     required this.approvalStatus,
@@ -374,14 +495,19 @@ class TaskModel {
 
   // Derived Convenience Getters for presentation compatibility
   String get stage => taskStage;
-  String get vendorName => legacyVendorName.isNotEmpty ? legacyVendorName : 'Unassigned Vendor';
+  String get vendorName =>
+      legacyVendorName.isNotEmpty ? legacyVendorName : 'Unassigned Vendor';
   String get partnerName => legacyPartnerName;
-  String get supervisorName => legacySupervisorName.isNotEmpty ? legacySupervisorName : 'Unassigned Supervisor';
+  String get supervisorName => legacySupervisorName.isNotEmpty
+      ? legacySupervisorName
+      : 'Unassigned Supervisor';
   String get assigneeName => assigneeSnapshot?.name ?? legacyAssigneeName;
   String get designation => assigneeSnapshot?.designation ?? legacyDesignation;
   String get mobile => assigneeSnapshot?.mobile ?? legacyMobile;
   String get projectManagerName => legacyProjectManagerName;
-  String get approverName => approverSnapshots.isNotEmpty ? approverSnapshots.first.name : legacySupervisorName;
+  String get approverName => approverSnapshots.isNotEmpty
+      ? approverSnapshots.first.name
+      : legacySupervisorName;
   String get creatorName => createdBySnapshot?.name ?? legacyCreatorName;
 
   String get locationName => locationSnapshot?.name ?? 'Location';
@@ -390,14 +516,21 @@ class TaskModel {
   String get blockName => locationSnapshot?.blockName ?? 'N/A';
   String get state => locationSnapshot?.state ?? 'RAJASTHAN';
 
-  double get plannedScope => totalLengthKm > 0 ? totalLengthKm : legacyPlannedScope;
-  double get completedScope => coveredLengthKm > 0 ? coveredLengthKm : legacyCompletedScope;
-  double get remainingScope => (plannedScope - completedScope).clamp(0.0, double.infinity);
-  double get progress => plannedScope > 0 ? ((completedScope / plannedScope) * 100.0).clamp(0.0, 100.0) : legacyProgress;
+  double get plannedScope =>
+      totalLengthKm > 0 ? totalLengthKm : legacyPlannedScope;
+  double get completedScope =>
+      coveredLengthKm > 0 ? coveredLengthKm : legacyCompletedScope;
+  double get remainingScope =>
+      (plannedScope - completedScope).clamp(0.0, double.infinity);
+  double get progress => plannedScope > 0
+      ? ((completedScope / plannedScope) * 100.0).clamp(0.0, 100.0)
+      : legacyProgress;
 
   double? get calculatedTotalLength {
     if (totalLengthKm > 0) return totalLengthKm;
-    if (routeSnapshot != null && routeSnapshot!.distanceKm > 0) return routeSnapshot!.distanceKm;
+    if (routeSnapshot != null && routeSnapshot!.distanceKm > 0) {
+      return routeSnapshot!.distanceKm;
+    }
     if (legacyPlannedScope > 0) return legacyPlannedScope;
     return null;
   }
@@ -423,7 +556,9 @@ class TaskModel {
   List<dynamic>? get hddLogs => legacyHddLogs;
   List<dynamic>? get depthPhotos => legacyDepthPhotos;
 
-  bool get isApproved => approvalStatus.toUpperCase() == 'APPROVED' || status.toUpperCase() == 'COMPLETED';
+  bool get isApproved =>
+      approvalStatus.toUpperCase() == 'APPROVED' ||
+      status.toUpperCase() == 'COMPLETED';
 
   bool get isEligibleForCompletion =>
       status.toUpperCase() != 'COMPLETED' &&
@@ -454,19 +589,108 @@ class TaskModel {
       return str.isNotEmpty ? str : fallback;
     }
 
-    final rawId = parseNonEmptyString(source['id'] ?? source['taskId'] ?? source['task_id'] ?? source['_id'], '');
-    final code = parseNonEmptyString(source['taskCode'] ?? source['code'] ?? source['task_code'] ?? source['taskNo'] ?? source['task_no'], 'TASK-2026-00000');
-    final name = parseNonEmptyString(source['displayName'] ?? source['name'] ?? source['taskName'] ?? source['title'] ?? source['task_name'], code != 'TASK-2026-00000' && code.isNotEmpty ? code : 'Unnamed Task');
-    final type = parseNonEmptyString(source['taskType'] ?? source['type'] ?? source['task_type'] ?? source['category'], 'FIBER_TRENCHING_DUCTING_TASK');
-    final level = parseNonEmptyString(source['taskLevel'] ?? source['level'] ?? source['task_level'], 'BLOCK');
-    final rawStatus = parseNonEmptyString(source['status'] ?? source['taskStatus'] ?? source['task_status'] ?? source['state'], 'CREATED');
-    final rawStage = parseNonEmptyString(source['taskStage'] ?? source['stage'] ?? source['task_stage'], 'PLANNING');
-    final rawApproval = parseNonEmptyString(source['approvalStatus'] ?? source['approval_status'] ?? source['approvalState'], 'PENDING');
-    final locCode = parseNonEmptyString(source['locationCode'] ?? source['location_code'] ?? source['locCode'], 'N/A');
+    final rawId = parseNonEmptyString(
+      source['id'] ?? source['taskId'] ?? source['task_id'] ?? source['_id'],
+      '',
+    );
+    final code = parseNonEmptyString(
+      source['taskCode'] ??
+          source['code'] ??
+          source['task_code'] ??
+          source['taskNo'] ??
+          source['task_no'],
+      'TASK-2026-00000',
+    );
+    final name = parseNonEmptyString(
+      source['displayName'] ??
+          source['name'] ??
+          source['taskName'] ??
+          source['title'] ??
+          source['task_name'],
+      code != 'TASK-2026-00000' && code.isNotEmpty ? code : 'Unnamed Task',
+    );
+    final type = parseNonEmptyString(
+      source['taskType'] ??
+          source['type'] ??
+          source['task_type'] ??
+          source['category'],
+      'FIBER_TRENCHING_DUCTING_TASK',
+    );
+    final level = parseNonEmptyString(
+      source['taskLevel'] ?? source['level'] ?? source['task_level'],
+      'BLOCK',
+    );
+    final levelProvided =
+        source['taskLevelProvided'] == true ||
+        [
+          source['taskLevel'],
+          source['level'],
+          source['task_level'],
+        ].any((value) => value != null && value.toString().trim().isNotEmpty);
+    final rawStatus = parseNonEmptyString(
+      source['status'] ??
+          source['taskStatus'] ??
+          source['task_status'] ??
+          source['state'],
+      'CREATED',
+    );
+    final rawStage = parseNonEmptyString(
+      source['taskStage'] ?? source['stage'] ?? source['task_stage'],
+      'PLANNING',
+    );
+    final rawApproval = parseNonEmptyString(
+      source['approvalStatus'] ??
+          source['approval_status'] ??
+          source['approvalState'],
+      'PENDING',
+    );
+    final locCode = parseNonEmptyString(
+      source['locationCode'] ?? source['location_code'] ?? source['locCode'],
+      'N/A',
+    );
+    final taskMeta = source['meta'] is Map<String, dynamic>
+        ? Map<String, dynamic>.from(source['meta'] as Map<String, dynamic>)
+        : <String, dynamic>{};
+    // Some task-service responses keep plan identifiers under taskConfig,
+    // while older responses flatten the same values at the task level.
+    // Preserve the nested values so Hindrance create can build its required
+    // BoQ-backed payload from either response shape.
+    final taskConfig = source['taskConfig'] ?? source['task_config'];
+    if (taskConfig is Map) {
+      for (final key in const [
+        'networkPlanId',
+        'network_plan_id',
+        'boqRevisionNo',
+        'boq_revision_no',
+        'revisionNo',
+        'projectPhase',
+        'project_phase',
+      ]) {
+        if (taskConfig[key] != null) taskMeta[key] = taskConfig[key];
+      }
+    }
+    for (final key in const [
+      'networkPlanId',
+      'network_plan_id',
+      'boqRevisionNo',
+      'boq_revision_no',
+      'revisionNo',
+      'projectPhase',
+      'project_phase',
+    ]) {
+      if (source[key] != null) taskMeta[key] = source[key];
+    }
 
     // Ancestors
-    final ancList = (source['ancestors'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [];
-    final depthVal = (source['depth'] as int?) ?? int.tryParse('${source['depth'] ?? 0}') ?? 0;
+    final ancList =
+        (source['ancestors'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [];
+    final depthVal =
+        (source['depth'] as int?) ??
+        int.tryParse('${source['depth'] ?? 0}') ??
+        0;
 
     // Snapshots
     RouteSnapshotModel? routeSnap;
@@ -493,13 +717,18 @@ class TaskModel {
       creatorSnap = AssigneeSnapshotModel.fromJson(source['createdBySnapshot']);
     }
 
-    final approverList = (source['approverSnapshots'] as List<dynamic>?)
+    final approverList =
+        (source['approverSnapshots'] as List<dynamic>?)
             ?.whereType<Map<String, dynamic>>()
             .map((a) => ApproverSnapshotModel.fromJson(a))
             .toList() ??
         const [];
 
-    final appRoles = (source['approverRoles'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [];
+    final appRoles =
+        (source['approverRoles'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [];
 
     // Embedded Task Execution (if present)
     TaskExecutionModel? execModel;
@@ -508,7 +737,8 @@ class TaskModel {
     }
 
     // Segments
-    final segSnapshots = (source['segmentSnapshots'] as List<dynamic>?)
+    final segSnapshots =
+        (source['segmentSnapshots'] as List<dynamic>?)
             ?.whereType<Map<String, dynamic>>()
             .map((s) => TaskSegmentModel.fromJson(s))
             .toList() ??
@@ -527,20 +757,53 @@ class TaskModel {
       scopeCompleted = source['scope']['completed'];
     }
 
-    final totLen = parseNum(source['totalLengthKm'] ?? source['total_length_km'] ?? source['plannedScope'] ?? scopePlanned) ?? 0.0;
-    final covLen = parseNum(source['coveredLengthKm'] ?? source['covered_length_km'] ?? source['completedScope'] ?? scopeCompleted) ?? 0.0;
+    final totLen =
+        parseNum(
+          source['totalLengthKm'] ??
+              source['total_length_km'] ??
+              source['plannedScope'] ??
+              scopePlanned,
+        ) ??
+        0.0;
+    final covLen =
+        parseNum(
+          source['coveredLengthKm'] ??
+              source['covered_length_km'] ??
+              source['completedScope'] ??
+              scopeCompleted,
+        ) ??
+        0.0;
 
-    final refTaskIds = (source['referenceTaskIds'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [];
+    final refTaskIds =
+        (source['referenceTaskIds'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const [];
 
     // Legacy vendor/supervisor fallback
     Map<String, dynamic> vendorMap = {};
-    if (source['vendor'] is Map<String, dynamic>) vendorMap = source['vendor'] as Map<String, dynamic>;
-    final vName = (source['vendorName'] ?? source['vendor_name'] ?? vendorMap['name'] ?? 'Unassigned Vendor').toString();
-    final partnerVal = (source['partnerName'] ?? source['partner'] ?? 'N/A').toString();
+    if (source['vendor'] is Map<String, dynamic>) {
+      vendorMap = source['vendor'] as Map<String, dynamic>;
+    }
+    final vName =
+        (source['vendorName'] ??
+                source['vendor_name'] ??
+                vendorMap['name'] ??
+                'Unassigned Vendor')
+            .toString();
+    final partnerVal = (source['partnerName'] ?? source['partner'] ?? 'N/A')
+        .toString();
 
     Map<String, dynamic> supervisorMap = {};
-    if (source['supervisor'] is Map<String, dynamic>) supervisorMap = source['supervisor'] as Map<String, dynamic>;
-    final supName = (source['supervisorName'] ?? source['supervisor_name'] ?? supervisorMap['name'] ?? 'Unassigned Supervisor').toString();
+    if (source['supervisor'] is Map<String, dynamic>) {
+      supervisorMap = source['supervisor'] as Map<String, dynamic>;
+    }
+    final supName =
+        (source['supervisorName'] ??
+                source['supervisor_name'] ??
+                supervisorMap['name'] ??
+                'Unassigned Supervisor')
+            .toString();
 
     Map<String, dynamic> assigneeMap = {};
     if (source['assigneeSnapshot'] is Map<String, dynamic>) {
@@ -548,20 +811,36 @@ class TaskModel {
     } else if (source['assignee'] is Map<String, dynamic>) {
       assigneeMap = source['assignee'] as Map<String, dynamic>;
     }
-    final assName = (source['assigneeName'] ?? assigneeMap['name'] ?? 'Unassigned').toString();
-    final desig = (source['designation'] ?? assigneeMap['designation'] ?? 'Field-Supervisor').toString();
+    final assName =
+        (source['assigneeName'] ?? assigneeMap['name'] ?? 'Unassigned')
+            .toString();
+    final desig =
+        (source['designation'] ??
+                assigneeMap['designation'] ??
+                'Field-Supervisor')
+            .toString();
     final mob = (source['mobile'] ?? assigneeMap['mobile'] ?? 'N/A').toString();
 
-    final pmName = (source['projectManagerName'] ?? source['projectManager'] ?? 'N/A').toString();
-    final creatName = (source['creatorName'] ?? source['creator'] ?? source['createdBy'] ?? creatorSnap?.name ?? 'System').toString();
+    final pmName =
+        (source['projectManagerName'] ?? source['projectManager'] ?? 'N/A')
+            .toString();
+    final creatName =
+        (source['creatorName'] ??
+                source['creator'] ??
+                source['createdBy'] ??
+                creatorSnap?.name ??
+                'System')
+            .toString();
 
-    final routesList = (source['routes'] as List<dynamic>?)
+    final routesList =
+        (source['routes'] as List<dynamic>?)
             ?.whereType<Map<String, dynamic>>()
             .map((r) => TaskRouteModel.fromJson(r))
             .toList() ??
         const [];
 
-    final pitList = (source['pits'] as List<dynamic>?)
+    final pitList =
+        (source['pits'] as List<dynamic>?)
             ?.whereType<Map<String, dynamic>>()
             .map((p) => TaskPitModel.fromJson(p))
             .toList() ??
@@ -573,7 +852,9 @@ class TaskModel {
       companyPhase: 'HERO Infra Phase 2',
     );
     if (source['telemetry'] is Map<String, dynamic>) {
-      telem = TaskTelemetryModel.fromJson(source['telemetry'] as Map<String, dynamic>);
+      telem = TaskTelemetryModel.fromJson(
+        source['telemetry'] as Map<String, dynamic>,
+      );
     }
 
     return TaskModel(
@@ -582,14 +863,22 @@ class TaskModel {
       displayName: name,
       taskType: type,
       taskLevel: level,
+      taskLevelProvided: levelProvided,
       status: rawStatus,
       taskStage: rawStage,
       approvalStatus: rawApproval,
-      parentTaskId: source['parentTaskId']?.toString() ?? source['parent_task_id']?.toString(),
+      parentTaskId:
+          source['parentTaskId']?.toString() ??
+          source['parent_task_id']?.toString() ??
+          source['parentId']?.toString() ??
+          source['parent_id']?.toString(),
       ancestors: ancList,
       depth: depthVal,
-      rootTaskId: source['rootTaskId']?.toString() ?? source['root_task_id']?.toString(),
-      vendorId: source['vendorId']?.toString() ?? source['vendor_id']?.toString(),
+      rootTaskId:
+          source['rootTaskId']?.toString() ??
+          source['root_task_id']?.toString(),
+      vendorId:
+          source['vendorId']?.toString() ?? source['vendor_id']?.toString(),
       locationCode: locCode,
       routeSnapshot: routeSnap,
       locationSnapshot: locSnap,
@@ -598,23 +887,36 @@ class TaskModel {
       approverRoles: appRoles,
       createdBySnapshot: creatorSnap,
       taskExecution: execModel,
-      currentApprovalStepIndex: (source['currentApprovalStepIndex'] as int?) ?? 0,
-      rejectionReason: source['rejectionReason']?.toString() ?? source['rejection_reason']?.toString(),
+      currentApprovalStepIndex:
+          (source['currentApprovalStepIndex'] as int?) ?? 0,
+      rejectionReason:
+          source['rejectionReason']?.toString() ??
+          source['rejection_reason']?.toString(),
       description: source['description']?.toString(),
       remarks: source['remarks']?.toString(),
       segmentSnapshots: segSnapshots,
       totalLengthKm: totLen,
       referenceTaskIds: refTaskIds,
       coveredLengthKm: covLen,
-      dailyTaskTarget: parseNum(source['dailyTaskTarget'] ?? source['daily_task_target']),
+      dailyTaskTarget: parseNum(
+        source['dailyTaskTarget'] ?? source['daily_task_target'],
+      ),
       expectedCompletionDays: source['expectedCompletionDays'] as int?,
       dueDate: DateParserUtils.parse(source['dueDate'] ?? source['due_date']),
       active: source['active'] as bool? ?? true,
-      createdAt: DateParserUtils.parse(source['createdAt'] ?? source['created_at']),
-      updatedAt: DateParserUtils.parse(source['updatedAt'] ?? source['updated_at']),
-      submittedAt: DateParserUtils.parse(source['submittedAt'] ?? source['submitted_at']),
-      completedAt: DateParserUtils.parse(source['completedAt'] ?? source['completed_at']),
-      meta: source['meta'] is Map<String, dynamic> ? source['meta'] as Map<String, dynamic> : null,
+      createdAt: DateParserUtils.parse(
+        source['createdAt'] ?? source['created_at'],
+      ),
+      updatedAt: DateParserUtils.parse(
+        source['updatedAt'] ?? source['updated_at'],
+      ),
+      submittedAt: DateParserUtils.parse(
+        source['submittedAt'] ?? source['submitted_at'],
+      ),
+      completedAt: DateParserUtils.parse(
+        source['completedAt'] ?? source['completed_at'],
+      ),
+      meta: taskMeta.isEmpty ? null : taskMeta,
       legacyVendorName: vName,
       legacyPartnerName: partnerVal,
       legacySupervisorName: supName,
@@ -631,54 +933,80 @@ class TaskModel {
       legacyPitsCount: (source['pitsCount'] as int?) ?? pitList.length,
       legacyPits: pitList,
       legacyTelemetry: telem,
-      legacyLatitude: parseNum(source['latitude'] ?? source['lat'] ?? (source['coordinates'] is Map ? source['coordinates']['latitude'] : null)),
-      legacyLongitude: parseNum(source['longitude'] ?? source['lng'] ?? (source['coordinates'] is Map ? source['coordinates']['longitude'] : null)),
+      legacyLatitude: parseNum(
+        source['latitude'] ??
+            source['lat'] ??
+            (source['coordinates'] is Map
+                ? source['coordinates']['latitude']
+                : null),
+      ),
+      legacyLongitude: parseNum(
+        source['longitude'] ??
+            source['lng'] ??
+            (source['coordinates'] is Map
+                ? source['coordinates']['longitude']
+                : null),
+      ),
       legacyExecutionStatus: source['executionStatus']?.toString(),
-      legacyRuntimeData: source['runtimeData'] is Map<String, dynamic> ? source['runtimeData'] as Map<String, dynamic> : null,
-      legacyTrenchingLogs: source['trenchingLogs'] is List ? source['trenchingLogs'] as List : null,
-      legacyHddLogs: source['hddLogs'] is List ? source['hddLogs'] as List : null,
-      legacyDepthPhotos: source['depthPhotos'] is List ? source['depthPhotos'] as List : null,
+      legacyRuntimeData: source['runtimeData'] is Map<String, dynamic>
+          ? source['runtimeData'] as Map<String, dynamic>
+          : null,
+      legacyTrenchingLogs: source['trenchingLogs'] is List
+          ? source['trenchingLogs'] as List
+          : null,
+      legacyHddLogs: source['hddLogs'] is List
+          ? source['hddLogs'] as List
+          : null,
+      legacyDepthPhotos: source['depthPhotos'] is List
+          ? source['depthPhotos'] as List
+          : null,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'taskCode': taskCode,
-        'displayName': displayName,
-        'taskType': taskType,
-        'taskLevel': taskLevel,
-        'status': status,
-        'taskStage': taskStage,
-        'approvalStatus': approvalStatus,
-        if (parentTaskId != null) 'parentTaskId': parentTaskId,
-        'ancestors': ancestors,
-        'depth': depth,
-        if (rootTaskId != null) 'rootTaskId': rootTaskId,
-        if (vendorId != null) 'vendorId': vendorId,
-        'locationCode': locationCode,
-        if (routeSnapshot != null) 'routeSnapshot': routeSnapshot!.toJson(),
-        if (locationSnapshot != null) 'locationSnapshot': locationSnapshot!.toJson(),
-        if (assigneeSnapshot != null) 'assigneeSnapshot': assigneeSnapshot!.toJson(),
-        'approverSnapshots': approverSnapshots.map((a) => a.toJson()).toList(),
-        'approverRoles': approverRoles,
-        if (createdBySnapshot != null) 'createdBySnapshot': createdBySnapshot!.toJson(),
-        if (taskExecution != null) 'taskExecution': taskExecution!.toJson(),
-        'currentApprovalStepIndex': currentApprovalStepIndex,
-        if (rejectionReason != null) 'rejectionReason': rejectionReason,
-        if (description != null) 'description': description,
-        if (remarks != null) 'remarks': remarks,
-        'segmentSnapshots': segmentSnapshots.map((s) => s.toJson()).toList(),
-        'totalLengthKm': totalLengthKm,
-        'referenceTaskIds': referenceTaskIds,
-        'coveredLengthKm': coveredLengthKm,
-        if (dailyTaskTarget != null) 'dailyTaskTarget': dailyTaskTarget,
-        if (expectedCompletionDays != null) 'expectedCompletionDays': expectedCompletionDays,
-        if (dueDate != null) 'dueDate': dueDate!.toIso8601String(),
-        'active': active,
-        if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
-        if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
-        if (submittedAt != null) 'submittedAt': submittedAt!.toIso8601String(),
-        if (completedAt != null) 'completedAt': completedAt!.toIso8601String(),
-        if (meta != null) 'meta': meta,
-      };
+    'id': id,
+    'taskCode': taskCode,
+    'displayName': displayName,
+    'taskType': taskType,
+    'taskLevel': taskLevel,
+    'taskLevelProvided': taskLevelProvided,
+    'status': status,
+    'taskStage': taskStage,
+    'approvalStatus': approvalStatus,
+    if (parentTaskId != null) 'parentTaskId': parentTaskId,
+    'ancestors': ancestors,
+    'depth': depth,
+    if (rootTaskId != null) 'rootTaskId': rootTaskId,
+    if (vendorId != null) 'vendorId': vendorId,
+    'locationCode': locationCode,
+    if (routeSnapshot != null) 'routeSnapshot': routeSnapshot!.toJson(),
+    if (locationSnapshot != null)
+      'locationSnapshot': locationSnapshot!.toJson(),
+    if (assigneeSnapshot != null)
+      'assigneeSnapshot': assigneeSnapshot!.toJson(),
+    'approverSnapshots': approverSnapshots.map((a) => a.toJson()).toList(),
+    'approverRoles': approverRoles,
+    if (createdBySnapshot != null)
+      'createdBySnapshot': createdBySnapshot!.toJson(),
+    if (taskExecution != null) 'taskExecution': taskExecution!.toJson(),
+    'currentApprovalStepIndex': currentApprovalStepIndex,
+    if (rejectionReason != null) 'rejectionReason': rejectionReason,
+    if (description != null) 'description': description,
+    if (remarks != null) 'remarks': remarks,
+    'segmentSnapshots': segmentSnapshots.map((s) => s.toJson()).toList(),
+    'totalLengthKm': totalLengthKm,
+    'referenceTaskIds': referenceTaskIds,
+    'coveredLengthKm': coveredLengthKm,
+    if (dailyTaskTarget != null) 'dailyTaskTarget': dailyTaskTarget,
+    if (expectedCompletionDays != null)
+      'expectedCompletionDays': expectedCompletionDays,
+    if (dueDate != null) 'dueDate': dueDate!.toIso8601String(),
+    'active': active,
+    if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
+    if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+    if (submittedAt != null) 'submittedAt': submittedAt!.toIso8601String(),
+    if (completedAt != null) 'completedAt': completedAt!.toIso8601String(),
+    if (meta != null) 'meta': meta,
+    'routes': legacyRoutes.map((route) => route.toJson()).toList(),
+  };
 }

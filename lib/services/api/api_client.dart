@@ -205,22 +205,25 @@ class ApiClient {
     };
     try {
       if (kDebugMode) {
-        print('[ApiClient] Uploading ${bytes.length} bytes via PUT to presigned URL: $uploadUrl');
+        // Presigned URLs contain temporary credentials; never write them to logs.
+        print('[ApiClient] Uploading ${bytes.length} bytes via presigned PUT.');
       }
       final response = await _client
           .put(uri, headers: headers, body: bytes)
-          .timeout(const Duration(seconds: 30));
+          // Video evidence can be large and the tablet may be on a slow mobile
+          // connection. Keep the signed URL alive for a realistic upload window.
+          .timeout(const Duration(minutes: 2));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         if (kDebugMode) {
           print('[ApiClient] Raw bytes PUT failed [${response.statusCode}]: ${response.body}');
         }
-        throw Exception('Failed to upload image [${response.statusCode}]: ${response.reasonPhrase}');
+        throw Exception('Failed to upload media [${response.statusCode}]: ${response.reasonPhrase}');
       }
       return response;
     } catch (e) {
       if (e.toString().contains('TimeoutException')) {
-        throw Exception('Photo upload timed out. Please check your connection and try again.');
+        throw Exception('Media upload timed out. Please check your connection and try again.');
       }
       rethrow;
     }

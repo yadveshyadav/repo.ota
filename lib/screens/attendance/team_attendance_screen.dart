@@ -12,10 +12,7 @@ import 'package:hero_app/services/api/breakdown_api_service.dart';
 class TeamAttendanceScreen extends StatefulWidget {
   final AttendanceController controller;
 
-  const TeamAttendanceScreen({
-    super.key,
-    required this.controller,
-  });
+  const TeamAttendanceScreen({super.key, required this.controller});
 
   @override
   State<TeamAttendanceScreen> createState() => _TeamAttendanceScreenState();
@@ -48,10 +45,14 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
           .toSet()
           .toList();
       if (chassisList.isNotEmpty) {
-        final result = await _breakdownApi.fetchOpenIssues(chassisList: chassisList);
+        final result = await _breakdownApi.fetchOpenIssues(
+          chassisList: chassisList,
+        );
         if (!mounted) return;
         setState(() {
-          _openByChassis = Map<String, MachineOpenIssuesBucket>.from(result.byChassis);
+          _openByChassis = Map<String, MachineOpenIssuesBucket>.from(
+            result.byChassis,
+          );
           for (final row in result.results) {
             if (row.machineChassisNo.isNotEmpty) {
               _openByChassis[row.machineChassisNo] = row;
@@ -76,7 +77,8 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
       for (final entry in _openByChassis.entries) {
         final keyLower = entry.key.toLowerCase().trim();
         if (keyLower == lower ||
-            (keyLower.isNotEmpty && (keyLower.contains(lower) || lower.contains(keyLower)))) {
+            (keyLower.isNotEmpty &&
+                (keyLower.contains(lower) || lower.contains(keyLower)))) {
           return entry.value;
         }
       }
@@ -93,7 +95,8 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
       if (record != null) continue; // Machine attendance marked today (Working)
 
       final bucket = _issuesFor(m);
-      if (bucket?.hasOpenIssue == true || m.isMaintenance || m.isUnderBreakdown) continue; // Breakdown reported
+      if (bucket?.hasOpenIssue == true || m.isMaintenance || m.isUnderBreakdown)
+        continue; // Breakdown reported
 
       unmarked.add(m);
     }
@@ -128,22 +131,40 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                 const SizedBox(height: 16),
                 Text(
                   machine.displayName,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                const Text('Is this machine working?', style: TextStyle(fontSize: 13, color: AppColors.mutedTextGray)),
+                const Text(
+                  'Is this machine working?',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.mutedTextGray,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
                     onPressed: () => Navigator.of(ctx).pop(true),
-                    icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-                    label: const Text('Working', style: TextStyle(fontWeight: FontWeight.bold)),
+                    icon: const Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'Working',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -154,11 +175,16 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                   child: OutlinedButton.icon(
                     onPressed: () => Navigator.of(ctx).pop(false),
                     icon: const Icon(Icons.report_problem_outlined, size: 20),
-                    label: const Text('Not Working', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text(
+                      'Not Working',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.criticalRed,
                       side: const BorderSide(color: AppColors.criticalRed),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -196,21 +222,39 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text('What kind of issue?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.deepNavy)),
+                const Text(
+                  'What kind of issue?',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text(machine.displayName, style: const TextStyle(fontSize: 13, color: AppColors.mutedTextGray)),
+                Text(
+                  machine.displayName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.mutedTextGray,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    icon: const Icon(Icons.build_circle_outlined, size: 20),
-                    label: const Text('External (OEM Breakdown)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    icon: const Icon(Icons.handyman_outlined, size: 20),
+                    label: const Text(
+                      'Internal (Ops Stop)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -219,13 +263,18 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                   width: double.infinity,
                   height: 46,
                   child: OutlinedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    icon: const Icon(Icons.handyman_outlined, size: 20),
-                    label: const Text('Internal (Ops Stop)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    icon: const Icon(Icons.build_circle_outlined, size: 20),
+                    label: const Text(
+                      'External (OEM Breakdown)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.deepNavy,
                       side: const BorderSide(color: AppColors.borderGray),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -255,7 +304,8 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
     final memberIdClean = member.id.trim().toLowerCase();
     final memberNameClean = member.displayName.trim().toLowerCase();
     final memberEmpClean = member.displayEmployeeId.trim().toLowerCase();
-    final memberChassisClean = member.machineChassis?.trim().toLowerCase() ?? '';
+    final memberChassisClean =
+        member.machineChassis?.trim().toLowerCase() ?? '';
 
     for (final m in assigned) {
       final mChassis = m.chassisNumber.trim().toLowerCase();
@@ -263,18 +313,30 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
 
       if (memberChassisClean.isNotEmpty &&
           (mChassis == memberChassisClean ||
-           mChassisNo == memberChassisClean ||
-           (mChassis.length > 4 && memberChassisClean.contains(mChassis)) ||
-           (memberChassisClean.length > 4 && mChassis.contains(memberChassisClean)))) {
+              mChassisNo == memberChassisClean ||
+              (mChassis.length > 4 && memberChassisClean.contains(mChassis)) ||
+              (memberChassisClean.length > 4 &&
+                  mChassis.contains(memberChassisClean)))) {
         return m;
       }
 
-      final opName = (m.operatorInfo?['name'] ?? m.operatorName ?? '').toString().trim().toLowerCase();
-      final opId = (m.operatorInfo?['id'] ?? m.operatorInfo?['user_id'] ?? '').toString().trim().toLowerCase();
+      final opName = (m.operatorInfo?['name'] ?? m.operatorName ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      final opId = (m.operatorInfo?['id'] ?? m.operatorInfo?['user_id'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
 
       if ((opId.isNotEmpty && opId == memberIdClean) ||
-          (opName.isNotEmpty && (opName == memberNameClean || opName.contains(memberNameClean) || memberNameClean.contains(opName))) ||
-          (opId.isNotEmpty && memberEmpClean.isNotEmpty && opId == memberEmpClean)) {
+          (opName.isNotEmpty &&
+              (opName == memberNameClean ||
+                  opName.contains(memberNameClean) ||
+                  memberNameClean.contains(opName))) ||
+          (opId.isNotEmpty &&
+              memberEmpClean.isNotEmpty &&
+              opId == memberEmpClean)) {
         return m;
       }
     }
@@ -286,7 +348,10 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
     return null;
   }
 
-  Future<Machine?> _selectMachineForMember(UserModel member, List<Machine> unmarkedMachines) async {
+  Future<Machine?> _selectMachineForMember(
+    UserModel member,
+    List<Machine> unmarkedMachines,
+  ) async {
     if (unmarkedMachines.isEmpty) return null;
 
     final explicitMachine = _getAssignedMachineForMember(member);
@@ -325,26 +390,57 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                 const SizedBox(height: 16),
                 Text(
                   'Select Machine for ${member.displayName}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                const Text('Choose the machine operating with this team member:', style: TextStyle(fontSize: 12, color: AppColors.mutedTextGray)),
+                const Text(
+                  'Choose the machine operating with this team member:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.mutedTextGray,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: unmarkedMachines.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1, color: AppColors.borderGray),
+                    separatorBuilder: (_, _) =>
+                        const Divider(height: 1, color: AppColors.borderGray),
                     itemBuilder: (context, idx) {
                       final m = unmarkedMachines[idx];
                       final siteNameVal = m.siteName ?? '';
-                      final siteDisplay = m.site.isNotEmpty ? m.site : (siteNameVal.isNotEmpty ? siteNameVal : 'Assigned');
+                      final siteDisplay = m.site.isNotEmpty
+                          ? m.site
+                          : (siteNameVal.isNotEmpty ? siteNameVal : 'Assigned');
                       return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        leading: const Icon(Icons.precision_manufacturing_outlined, color: AppColors.primaryGreen),
-                        title: Text(m.displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        subtitle: Text('Chassis: ${m.chassisNumber} · $siteDisplay', style: const TextStyle(fontSize: 11)),
-                        trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.mutedTextGray),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        leading: const Icon(
+                          Icons.precision_manufacturing_outlined,
+                          color: AppColors.primaryGreen,
+                        ),
+                        title: Text(
+                          m.displayName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'Chassis: ${m.chassisNumber} · $siteDisplay',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        trailing: const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppColors.mutedTextGray,
+                        ),
                         onTap: () => Navigator.of(ctx).pop(m),
                       );
                     },
@@ -359,9 +455,17 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.mutedTextGray,
                       side: const BorderSide(color: AppColors.borderGray),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
-                    child: const Text('Mark Team Member Only (No Machine)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Mark Team Member Only (No Machine)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -391,7 +495,10 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
             ),
           ),
         );
-        if (widget.controller.getTodayAttendanceForMachine(machine.chassisNumber) == null) {
+        if (widget.controller.getTodayAttendanceForMachine(
+              machine.chassisNumber,
+            ) ==
+            null) {
           return; // Machine attendance wasn't finished
         }
       } else {
@@ -403,20 +510,22 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
 
     if (!mounted) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AttendanceCaptureScreen(
-          controller: widget.controller,
-          isCheckOut: false,
-          targetTeamMember: member,
-        ),
-      ),
-    ).then((_) {
-      if (mounted) {
-        widget.controller.fetchAuthorizedTeamMembers();
-        setState(() {});
-      }
-    });
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => AttendanceCaptureScreen(
+              controller: widget.controller,
+              isCheckOut: false,
+              targetTeamMember: member,
+            ),
+          ),
+        )
+        .then((_) {
+          if (mounted) {
+            widget.controller.fetchAuthorizedTeamMembers();
+            setState(() {});
+          }
+        });
   }
 
   @override
@@ -431,7 +540,11 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
           children: const [
             Text(
               'Team Attendance',
-              style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: AppColors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             Text(
               'Mark attendance for your authorized team members',
@@ -465,7 +578,9 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
         final teamMembers = widget.controller.teamMembers;
 
         if (isLoading) {
-          return const Center(child: CircularProgressIndicator(color: AppColors.primaryGreen));
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.primaryGreen),
+          );
         }
 
         if (teamMembers.isEmpty) {
@@ -475,11 +590,29 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: const [
-                  Icon(Icons.people_outline_rounded, size: 52, color: AppColors.mutedTextGray),
+                  Icon(
+                    Icons.people_outline_rounded,
+                    size: 52,
+                    color: AppColors.mutedTextGray,
+                  ),
                   SizedBox(height: 16),
-                  Text('No Authorized Team Members', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.deepNavy)),
+                  Text(
+                    'No Authorized Team Members',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.deepNavy,
+                    ),
+                  ),
                   SizedBox(height: 6),
-                  Text('You do not have any employees assigned under your team authority.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.mutedTextGray, fontSize: 13)),
+                  Text(
+                    'You do not have any employees assigned under your team authority.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.mutedTextGray,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -514,10 +647,16 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
         color: AppColors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isMarked ? AppColors.primaryGreen.withValues(alpha: 0.4) : AppColors.borderGray,
+          color: isMarked
+              ? AppColors.primaryGreen.withValues(alpha: 0.4)
+              : AppColors.borderGray,
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0x05000000), blurRadius: 4, offset: Offset(0, 2)),
+          BoxShadow(
+            color: Color(0x05000000),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
         ],
       ),
       child: Column(
@@ -531,12 +670,18 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: (isMarked ? AppColors.primaryGreen : AppColors.deepNavy).withValues(alpha: 0.15),
+                      backgroundColor:
+                          (isMarked
+                                  ? AppColors.primaryGreen
+                                  : AppColors.deepNavy)
+                              .withValues(alpha: 0.15),
                       child: Text(
                         member.initials,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: isMarked ? AppColors.primaryGreen : AppColors.deepNavy,
+                          color: isMarked
+                              ? AppColors.primaryGreen
+                              : AppColors.deepNavy,
                           fontSize: 13,
                         ),
                       ),
@@ -558,7 +703,10 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                           ),
                           Text(
                             'ID: ${member.displayEmployeeId} · ${member.role}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.mutedTextGray),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.mutedTextGray,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -570,44 +718,49 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
               ),
               if (isMarked)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: (!todayRecord.isSynced
-                            ? AppColors.infoBlue
-                            : todayRecord.isApproved
+                    color:
+                        (!todayRecord.isSynced
+                                ? AppColors.infoBlue
+                                : todayRecord.isApproved
                                 ? AppColors.successGreen
                                 : todayRecord.isRejected
-                                    ? AppColors.criticalRed
-                                    : AppColors.warningAmber)
-                        .withValues(alpha: 0.12),
+                                ? AppColors.criticalRed
+                                : AppColors.warningAmber)
+                            .withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: (!todayRecord.isSynced
-                              ? AppColors.infoBlue
-                              : todayRecord.isApproved
+                      color:
+                          (!todayRecord.isSynced
+                                  ? AppColors.infoBlue
+                                  : todayRecord.isApproved
                                   ? AppColors.successGreen
                                   : todayRecord.isRejected
-                                      ? AppColors.criticalRed
-                                      : AppColors.warningAmber)
-                          .withValues(alpha: 0.3),
+                                  ? AppColors.criticalRed
+                                  : AppColors.warningAmber)
+                              .withValues(alpha: 0.3),
                     ),
                   ),
                   child: Text(
                     !todayRecord.isSynced
                         ? '• OFFLINE (PENDING SYNC)'
                         : todayRecord.isApproved
-                            ? '• APPROVED'
-                            : todayRecord.isRejected
-                                ? '• REJECTED'
-                                : '• PENDING APPROVAL',
+                        ? '• APPROVED'
+                        : todayRecord.isRejected
+                        ? '• REJECTED'
+                        : '• PENDING APPROVAL',
                     style: TextStyle(
                       color: !todayRecord.isSynced
                           ? AppColors.infoBlue
                           : todayRecord.isApproved
-                              ? AppColors.successGreen
-                              : todayRecord.isRejected
-                                  ? AppColors.criticalRed
-                                  : AppColors.warningAmber,
+                          ? AppColors.successGreen
+                          : todayRecord.isRejected
+                          ? AppColors.criticalRed
+                          : AppColors.warningAmber,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
@@ -622,15 +775,24 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
               children: [
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.lightGreenBg,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.primaryGreen.withValues(alpha: 0.2)),
+                      border: Border.all(
+                        color: AppColors.primaryGreen.withValues(alpha: 0.2),
+                      ),
                     ),
                     child: Row(
                       children: const [
-                        Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primaryGreen),
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 16,
+                          color: AppColors.primaryGreen,
+                        ),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -659,7 +821,10 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                     );
                   },
                   icon: const Icon(Icons.visibility_outlined, size: 16),
-                  label: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  label: const Text(
+                    'View',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.deepNavy,
                   ),
@@ -675,12 +840,17 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
                 icon: const Icon(Icons.camera_alt_outlined, size: 16),
                 label: Text(
                   'Mark Attendance for ${member.displayName.split(' ').first}',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppColors.primaryGreen),
                   foregroundColor: AppColors.primaryGreen,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),

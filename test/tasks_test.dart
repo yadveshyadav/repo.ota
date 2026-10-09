@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hero_app/features/tasks/controller/task_controller.dart';
+import 'package:hero_app/features/hindrance/data/hindrance_task_data_source.dart';
 import 'package:hero_app/features/tasks/screens/task_detail_screen.dart';
 import 'package:hero_app/features/tasks/screens/tasks_screen.dart';
 import 'package:hero_app/features/tasks/widgets/task_card.dart';
@@ -44,6 +45,7 @@ void main() {
         'progress': 0.0,
         'routes': [
           {
+            'id': 'ring-task-id',
             'routeCode': 'R01',
             'routeName': 'Route 01',
             'distanceKm': 57.60,
@@ -52,6 +54,7 @@ void main() {
             'targetNode': 'Jawla',
             'segments': [
               {
+                'id': 'segment-task-id',
                 'segmentCode': 'R01-S01',
                 'startNode': 'Modi Kalan',
                 'targetNode': 'Bherunda Junction',
@@ -83,7 +86,14 @@ void main() {
       expect(task.plannedScope, 180.40);
       expect(task.routes.length, 1);
       expect(task.routes.first.routeCode, 'R01');
+      expect(task.routes.first.taskId, 'ring-task-id');
       expect(task.routes.first.segments.first.segmentCode, 'R01-S01');
+      expect(task.routes.first.segments.first.taskId, 'segment-task-id');
+      final offlineTask = TaskModel.fromJson(task.toJson());
+      expect(offlineTask.legacyRoutes.length, 1);
+      expect(offlineTask.legacyRoutes.first.segments.first.segmentCode, 'R01-S01');
+      expect(offlineTask.legacyRoutes.first.taskId, 'ring-task-id');
+      expect(offlineTask.legacyRoutes.first.segments.first.taskId, 'segment-task-id');
       expect(task.latitude, 26.8500);
       expect(task.longitude, 74.3800);
     });
@@ -132,6 +142,55 @@ void main() {
       expect(response.totalCount, 1);
       expect(response.summaryCounts['GP_SURVEY'], 5);
       expect(response.tasks.first.taskCode, 'TASK-101');
+    });
+
+    test('Flattens nested Block, Ring, Segment hierarchy with parent IDs', () {
+      final response = TaskResponse.fromJson({
+        'data': {
+          'content': [
+            {
+              'id': 'block-1',
+              'taskCode': 'TASK-B',
+              'name': 'BHERUNDA',
+              'taskType': 'FIBER_TRENCHING_DUCTING_TASK',
+              'rings': [
+                {
+                  'id': 'ring-1',
+                  'taskCode': 'TASK-R',
+                  'name': 'R01',
+                  'segments': [
+                    {
+                      'id': 'segment-1',
+                      'taskCode': 'TASK-S',
+                      'name': 'BHERUNDA - JC0002',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          'totalElements': 1,
+        },
+      });
+
+      expect(response.tasks, hasLength(3));
+      final block = response.tasks[0];
+      final ring = response.tasks[1];
+      final segment = response.tasks[2];
+      expect(block.taskLevel, 'BLOCK');
+      expect(ring.taskLevel, 'RING');
+      expect(ring.parentTaskId, block.id);
+      expect(segment.taskLevel, 'SEGMENT');
+      expect(segment.parentTaskId, ring.id);
+      expect(HindranceTaskDataSource.isBlockTask(block), isTrue);
+      expect(
+        HindranceTaskDataSource.ringsForBlock(block, response.tasks),
+        [ring],
+      );
+      expect(
+        HindranceTaskDataSource.segmentsForRing(ring, response.tasks),
+        [segment],
+      );
     });
   });
 

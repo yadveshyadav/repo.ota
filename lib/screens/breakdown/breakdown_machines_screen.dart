@@ -18,7 +18,8 @@ class BreakdownMachinesScreen extends StatefulWidget {
   const BreakdownMachinesScreen({super.key, this.repository});
 
   @override
-  State<BreakdownMachinesScreen> createState() => _BreakdownMachinesScreenState();
+  State<BreakdownMachinesScreen> createState() =>
+      _BreakdownMachinesScreenState();
 }
 
 class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
@@ -72,12 +73,14 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
         final vendorNameClean = user.vendorName?.trim().toLowerCase();
         final vendorNames = (user.vendors.isNotEmpty)
             ? user.vendors
-                .map((v) => v['name']?.toString().toLowerCase())
-                .whereType<String>()
-                .toSet()
+                  .map((v) => v['name']?.toString().toLowerCase())
+                  .whereType<String>()
+                  .toSet()
             : <String>{};
 
-        if (vendorNameClean != null && vendorNameClean.isNotEmpty && vendorNameClean != 'unassigned vendor') {
+        if (vendorNameClean != null &&
+            vendorNameClean.isNotEmpty &&
+            vendorNameClean != 'unassigned vendor') {
           vendorNames.add(vendorNameClean);
         }
 
@@ -86,7 +89,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
             final mVendor = m.vendorName?.toLowerCase();
             if (mVendor == null || mVendor.isEmpty) return true;
             return vendorNames.contains(mVendor) ||
-                vendorNames.any((v) => mVendor.contains(v) || v.contains(mVendor));
+                vendorNames.any(
+                  (v) => mVendor.contains(v) || v.contains(mVendor),
+                );
           }).toList();
 
           if (filteredByVendor.isNotEmpty) {
@@ -105,8 +110,12 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
       Map<String, MachineOpenIssuesBucket> openByChassis = {};
       if (chassisList.isNotEmpty) {
         try {
-          final result = await _breakdownApi.fetchOpenIssues(chassisList: chassisList);
-          openByChassis = Map<String, MachineOpenIssuesBucket>.from(result.byChassis);
+          final result = await _breakdownApi.fetchOpenIssues(
+            chassisList: chassisList,
+          );
+          openByChassis = Map<String, MachineOpenIssuesBucket>.from(
+            result.byChassis,
+          );
           for (final row in result.results) {
             if (row.machineChassisNo.isNotEmpty) {
               openByChassis[row.machineChassisNo] = row;
@@ -146,7 +155,8 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
       for (final entry in _openByChassis.entries) {
         final keyLower = entry.key.toLowerCase().trim();
         if (keyLower == lower ||
-            (keyLower.isNotEmpty && (keyLower.contains(lower) || lower.contains(keyLower)))) {
+            (keyLower.isNotEmpty &&
+                (keyLower.contains(lower) || lower.contains(keyLower)))) {
           return entry.value;
         }
       }
@@ -157,7 +167,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
   int get _breakdownCount {
     return _allMachines.where((m) {
       final bucket = _issuesFor(m);
-      return bucket?.hasOpenIssue == true || m.isMaintenance || m.isUnderBreakdown;
+      return bucket?.hasOpenIssue == true ||
+          m.isMaintenance ||
+          m.isUnderBreakdown;
     }).length;
   }
 
@@ -170,7 +182,10 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
 
       _filteredMachines = _allMachines.where((machine) {
         final bucket = _issuesFor(machine);
-        final hasOpen = bucket?.hasOpenIssue == true || machine.isMaintenance;
+        final hasOpen =
+            bucket?.hasOpenIssue == true ||
+            machine.isMaintenance ||
+            machine.isUnderBreakdown;
 
         // 1. Status Pill Filter
         if (filter == 'under breakdown' && !hasOpen) {
@@ -248,13 +263,24 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                     ),
                     if (hasOpenIssue)
                       FadeTransition(
-                        opacity: _blinkController.drive(CurveTween(curve: Curves.easeInOut)),
+                        opacity: _blinkController.drive(
+                          CurveTween(curve: Curves.easeInOut),
+                        ),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
-                            color: AppColors.criticalRed.withValues(alpha: 0.12),
+                            color: AppColors.criticalRed.withValues(
+                              alpha: 0.12,
+                            ),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.35)),
+                            border: Border.all(
+                              color: AppColors.criticalRed.withValues(
+                                alpha: 0.35,
+                              ),
+                            ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -282,7 +308,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                       ),
                   ],
                 ),
-                if (hasOpenIssue && openBucket != null && openBucket.issues.isNotEmpty) ...[
+                if (hasOpenIssue &&
+                    openBucket != null &&
+                    openBucket.issues.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Container(
                     width: double.infinity,
@@ -290,7 +318,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                     decoration: BoxDecoration(
                       color: AppColors.criticalRed.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.25)),
+                      border: Border.all(
+                        color: AppColors.criticalRed.withValues(alpha: 0.25),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,27 +335,33 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                           ),
                         ),
                         const SizedBox(height: 4),
-                        ...openBucket.issues.map((issue) => Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.circle, size: 6, color: AppColors.criticalRed),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  '${issue.isOem ? 'OEM' : 'Ops'} Ticket ${issue.ttNumber ?? ''}: ${issue.reason}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.deepNavy,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                        ...openBucket.issues.map(
+                          (issue) => Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.circle,
+                                  size: 6,
+                                  color: AppColors.criticalRed,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    '${issue.isOem ? 'OEM' : 'Ops'} Ticket ${issue.ttNumber ?? ''}: ${issue.reason}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.deepNavy,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        )),
+                        ),
                       ],
                     ),
                   ),
@@ -337,7 +373,10 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                     height: 46,
                     child: ElevatedButton.icon(
                       onPressed: () => Navigator.of(ctx).pop('resolve'),
-                      icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+                      icon: const Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 20,
+                      ),
                       label: const Text(
                         'Resolve & Close Open Issues',
                         style: TextStyle(fontWeight: FontWeight.bold),
@@ -345,7 +384,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primaryGreen,
                         foregroundColor: AppColors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                     ),
                   ),
@@ -355,16 +396,18 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop('oem'),
-                    icon: const Icon(Icons.build_circle_outlined, size: 20),
+                    onPressed: () => Navigator.of(ctx).pop('ops'),
+                    icon: const Icon(Icons.handyman_outlined, size: 20),
                     label: const Text(
-                      'Report OEM Breakdown (External)',
+                      'Report Ops Stop (Internal)',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: hasOpenIssue ? AppColors.deepNavy : AppColors.primaryGreen,
+                      backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -373,16 +416,18 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                   width: double.infinity,
                   height: 46,
                   child: OutlinedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop('ops'),
-                    icon: const Icon(Icons.handyman_outlined, size: 20),
+                    onPressed: () => Navigator.of(ctx).pop('oem'),
+                    icon: const Icon(Icons.build_circle_outlined, size: 20),
                     label: const Text(
-                      'Report Ops Stop (Internal)',
+                      'Report OEM Breakdown (External)',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.deepNavy,
                       side: const BorderSide(color: AppColors.borderGray),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -445,10 +490,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
         elevation: 0,
         title: InkWell(
           onTap: () {
-            Navigator.of(context).pushNamedAndRemoveUntil(
-              AppRoutes.dashboard,
-              (route) => false,
-            );
+            Navigator.of(
+              context,
+            ).pushNamedAndRemoveUntil(AppRoutes.dashboard, (route) => false);
           },
           borderRadius: BorderRadius.circular(8),
           child: const Padding(
@@ -458,7 +502,11 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
               children: [
                 Text(
                   'Breakdown Management',
-                  style: TextStyle(color: AppColors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: AppColors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 Text(
                   'Live status & issue reporting for fleet machines',
@@ -493,8 +541,15 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
               style: const TextStyle(fontSize: 13, color: AppColors.deepNavy),
               decoration: InputDecoration(
                 hintText: 'Search chassis, model, site…',
-                hintStyle: const TextStyle(color: AppColors.mutedTextGray, fontSize: 13),
-                prefixIcon: const Icon(Icons.search_rounded, color: AppColors.mutedTextGray, size: 20),
+                hintStyle: const TextStyle(
+                  color: AppColors.mutedTextGray,
+                  fontSize: 13,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  color: AppColors.mutedTextGray,
+                  size: 20,
+                ),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear_rounded, size: 18),
@@ -508,7 +563,10 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                 filled: true,
                 fillColor: AppColors.white,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: AppColors.borderGray),
@@ -519,7 +577,10 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.focusBorder, width: 1.4),
+                  borderSide: const BorderSide(
+                    color: AppColors.focusBorder,
+                    width: 1.4,
+                  ),
                 ),
               ),
             ),
@@ -579,7 +640,9 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
           children: [
             if (isDanger && _breakdownCount > 0) ...[
               FadeTransition(
-                opacity: _blinkController.drive(CurveTween(curve: Curves.easeInOut)),
+                opacity: _blinkController.drive(
+                  CurveTween(curve: Curves.easeInOut),
+                ),
                 child: Container(
                   width: 6,
                   height: 6,
@@ -619,12 +682,19 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: AppColors.criticalRed, size: 36),
+              const Icon(
+                Icons.error_outline,
+                color: AppColors.criticalRed,
+                size: 36,
+              ),
               const SizedBox(height: 10),
               Text(
                 _errorMessage!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.criticalRed, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.criticalRed,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 14),
               ElevatedButton(
@@ -646,13 +716,21 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.check_circle_outline_rounded, size: 42, color: AppColors.mutedTextGray),
+            const Icon(
+              Icons.check_circle_outline_rounded,
+              size: 42,
+              color: AppColors.mutedTextGray,
+            ),
             const SizedBox(height: 12),
             Text(
               _selectedStatusFilter.toLowerCase() == 'under breakdown'
                   ? 'No machines under breakdown'
                   : 'No machines found',
-              style: const TextStyle(color: AppColors.deepNavy, fontSize: 14, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                color: AppColors.deepNavy,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 4),
             const Text(
@@ -674,9 +752,15 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
         itemBuilder: (context, index) {
           final machine = _filteredMachines[index];
           final openBucket = _issuesFor(machine);
-          final hasOpenIssue = openBucket?.hasOpenIssue == true || machine.isMaintenance;
-          final openCount = openBucket?.openCount ?? (machine.isMaintenance ? 1 : 0);
-          final topIssue = (openBucket?.issues.isNotEmpty == true) ? openBucket!.issues.first : null;
+          final hasOpenIssue =
+              openBucket?.hasOpenIssue == true ||
+              machine.isMaintenance ||
+              machine.isUnderBreakdown;
+          final openCount =
+              openBucket?.openCount ?? (machine.isMaintenance ? 1 : 0);
+          final topIssue = (openBucket?.issues.isNotEmpty == true)
+              ? openBucket!.issues.first
+              : null;
 
           return MachineCardWidget(
             machine: machine,
@@ -691,4 +775,3 @@ class _BreakdownMachinesScreenState extends State<BreakdownMachinesScreen>
     );
   }
 }
-

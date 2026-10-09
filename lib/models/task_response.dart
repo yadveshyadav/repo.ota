@@ -63,6 +63,19 @@ class TaskResponse {
 
       if (json['data'] is List) {
         rawList = json['data'] as List<dynamic>;
+        final list = _flattenTasks(rawList)
+            .map((item) => TaskModel.fromJson(item))
+            .where((task) => task.id.isNotEmpty)
+            .toList();
+        return TaskResponse(
+          tasks: list,
+          totalCount: list.length,
+          totalPages: 1,
+          currentPage: requestPage,
+          pageSize: requestSize,
+          hasNext: false,
+          hasPrevious: false,
+        );
       } else {
         if (json.containsKey('data') && json['data'] is Map<String, dynamic>) {
           source = json['data'] as Map<String, dynamic>;
@@ -86,9 +99,9 @@ class TaskResponse {
         }
       }
 
-      final list = rawList
-          .whereType<Map<String, dynamic>>()
+      final list = _flattenTasks(rawList)
           .map((item) => TaskModel.fromJson(item))
+          .where((task) => task.id.isNotEmpty)
           .toList();
 
       int parseNumInt(dynamic val, [int fallback = 0]) {
@@ -187,5 +200,60 @@ class TaskResponse {
       hasNext: false,
       hasPrevious: false,
     );
+  }
+
+  /// UAT may return either a flat task page or Blocks containing nested Rings
+  /// and Segments. Keep both representations usable by the same hierarchy UI.
+  static List<Map<String, dynamic>> _flattenTasks(List<dynamic> rows) {
+    final flattened = <Map<String, dynamic>>[];
+    const childKeys = [
+      'children',
+      'childTasks',
+      'child_tasks',
+      'subTasks',
+      'sub_tasks',
+      'rings',
+      'segments',
+    ];
+
+    void visit(Map<String, dynamic> row, {String? parentId, String? level}) {
+      final id = (row['id'] ?? row['taskId'] ?? row['task_id'] ?? row['_id'])
+          ?.toString();
+      final normalized = Map<String, dynamic>.from(row);
+      if (parentId != null &&
+          normalized['parentTaskId'] == null &&
+          normalized['parent_task_id'] == null &&
+          normalized['parentId'] == null &&
+          normalized['parent_id'] == null) {
+        normalized['parentTaskId'] = parentId;
+      }
+      if (level != null &&
+          normalized['taskLevel'] == null &&
+          normalized['task_level'] == null &&
+          normalized['level'] == null) {
+        normalized['taskLevel'] = level;
+      }
+      flattened.add(normalized);
+
+      for (final key in childKeys) {
+        final children = row[key];
+        if (children is! List) continue;
+        final childLevel = key.toLowerCase().contains('segment')
+            ? 'SEGMENT'
+            : key.toLowerCase().contains('ring')
+            ? 'RING'
+            : level == null || level.toUpperCase() == 'BLOCK'
+            ? 'RING'
+            : 'SEGMENT';
+        for (final child in children.whereType<Map<String, dynamic>>()) {
+          visit(child, parentId: id, level: childLevel);
+        }
+      }
+    }
+
+    for (final row in rows.whereType<Map<String, dynamic>>()) {
+      visit(row);
+    }
+    return flattened;
   }
 }

@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import '../core/constants/app_constants.dart';
+import '../features/hindrance/data/hindrance_task_data_source.dart';
 import '../features/auth/models/auth_token.dart';
 import '../features/auth/models/user_model.dart';
 import '../features/auth/services/auth_storage_service.dart';
@@ -8,10 +12,7 @@ import '../services/authorization_service.dart';
 
 /// Abstract Authentication Repository interface
 abstract class AuthRepository {
-  Future<UserModel> login({
-    required String username,
-    required String password,
-  });
+  Future<UserModel> login({required String username, required String password});
 
   Future<void> logout();
 
@@ -22,7 +23,7 @@ abstract class AuthRepository {
   String? getAccessToken();
 }
 
-/// Production AuthRepository consuming HERO / Auth API endpoints
+/// AuthRepository consuming Dev authentication and task APIs.
 class ApiAuthRepository implements AuthRepository {
   final AuthApiService apiService;
   final AuthStorageService storageService;
@@ -32,15 +33,23 @@ class ApiAuthRepository implements AuthRepository {
     ApiClient? apiClient,
     AuthApiService? apiService,
     AuthStorageService? storageService,
-  })  : apiClient = apiClient ?? ApiClient(),
-        apiService = apiService ??
-            AuthApiService(apiClient: apiClient ?? ApiClient()),
-        storageService = storageService ?? AuthStorageService();
+  }) : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.devApiBaseUrl),
+       apiService =
+           apiService ??
+           AuthApiService(
+             apiClient:
+                 apiClient ?? ApiClient(baseUrl: AppConstants.devApiBaseUrl),
+           ),
+       storageService = storageService ?? AuthStorageService();
 
   UserModel? _getFallbackUser(String username, String password) {
     final clean = username.trim().toLowerCase();
 
-    if (clean == 'admin' && (password == 'admin123' || password == 'admin' || password == 'Mig0021@00' || password == 'mig0021@00')) {
+    if (clean == 'admin' &&
+        (password == 'admin123' ||
+            password == 'admin' ||
+            password == 'Mig0021@00' ||
+            password == 'mig0021@00')) {
       return const UserModel(
         id: '1',
         username: 'admin',
@@ -51,7 +60,8 @@ class ApiAuthRepository implements AuthRepository {
         employeeId: 'EMP-001',
       );
     }
-    if ((clean == 'employee1' || clean == 'john') && (password == 'admin123' || password == 'emp123')) {
+    if ((clean == 'employee1' || clean == 'john') &&
+        (password == 'admin123' || password == 'emp123')) {
       return const UserModel(
         id: 'emp_101',
         username: 'employee1',
@@ -62,7 +72,8 @@ class ApiAuthRepository implements AuthRepository {
         employeeId: 'EMP001',
       );
     }
-    if ((clean == 'employee2' || clean == 'rahul') && (password == 'admin123' || password == 'emp123')) {
+    if ((clean == 'employee2' || clean == 'rahul') &&
+        (password == 'admin123' || password == 'emp123')) {
       return const UserModel(
         id: 'emp_102',
         username: 'employee2',
@@ -90,18 +101,39 @@ class ApiAuthRepository implements AuthRepository {
         password: password,
       );
 
-      // Parse tokens
+      // The Dev login token also authenticates Hindrance task reads and
+      // merged-task creation.
       final token = AuthToken.fromJson(responseJson);
 
       if (token.accessToken.isNotEmpty) {
+        if (apiService.lastLoginWasDev) {
+          await storageService.saveDevTaskAccessToken(token.accessToken);
+        } else {
+          try {
+            final devTaskToken = await apiService.loginForDevTasks(
+              phoneNumber: cleanUsername,
+              password: password,
+            );
+            await storageService.saveDevTaskAccessToken(devTaskToken);
+          } catch (error) {
+            if (kDebugMode) {
+              print(
+                '[AuthRepository] HERO login succeeded, but Dev task access could not be established: $error',
+              );
+            }
+          }
+        }
         // Configure ApiClient with new token
         apiClient.setAuthToken(token.accessToken);
 
         // Parse User details
         Map<String, dynamic>? userData;
         if (responseJson['data'] is Map<String, dynamic> &&
-            (responseJson['data'] as Map<String, dynamic>)['user'] is Map<String, dynamic>) {
-          userData = (responseJson['data'] as Map<String, dynamic>)['user'] as Map<String, dynamic>;
+            (responseJson['data'] as Map<String, dynamic>)['user']
+                is Map<String, dynamic>) {
+          userData =
+              (responseJson['data'] as Map<String, dynamic>)['user']
+                  as Map<String, dynamic>;
         } else if (responseJson['user'] is Map<String, dynamic>) {
           userData = responseJson['user'] as Map<String, dynamic>;
         } else if (responseJson['data'] is Map<String, dynamic>) {
@@ -113,15 +145,27 @@ class ApiAuthRepository implements AuthRepository {
             : UserModel(
                 id: '1',
                 username: cleanUsername,
-                email: cleanUsername.contains('@') ? cleanUsername : '$cleanUsername@hero.com',
+                email: cleanUsername.contains('@')
+                    ? cleanUsername
+                    : '$cleanUsername@hero.com',
               );
 
         // Persist session and initialize Central Authorization Service
         await storageService.saveSession(token: token, user: user);
         AuthorizationService.instance.initialize(user: user);
 
+        // Preload API-backed block/ring/segment choices after login; cached
+        // task snapshots remain available to the Hindrance form offline.
+        unawaited(
+          HindranceTaskDataSource()
+              .load(user.id, forceRefresh: true)
+              .then<void>((_) {}, onError: (_) {}),
+        );
+
         if (kDebugMode) {
-          print('[AuthRepository] Real API Login successful for ${user.fullName}');
+          print(
+            '[AuthRepository] Real API Login successful for ${user.fullName}',
+          );
         }
 
         return user;
@@ -129,8 +173,13 @@ class ApiAuthRepository implements AuthRepository {
     } catch (e) {
       final errStr = e.toString().toLowerCase();
 
-      if (errStr.contains('timeout') || errStr.contains('connection') || errStr.contains('network') || errStr.contains('socket')) {
-        throw Exception('Server connection timed out. Please check your internet connection and try again.');
+      if (errStr.contains('timeout') ||
+          errStr.contains('connection') ||
+          errStr.contains('network') ||
+          errStr.contains('socket')) {
+        throw Exception(
+          'Server connection timed out. Please check your internet connection and try again.',
+        );
       }
 
       // If the server explicitly rejected the credentials
@@ -142,14 +191,18 @@ class ApiAuthRepository implements AuthRepository {
           errStr.contains('password') ||
           errStr.contains('unauthorized')) {
         if (kDebugMode) {
-          print('[AuthRepository] Real API rejected credentials ($e). Denying login.');
+          print(
+            '[AuthRepository] Real API rejected credentials ($e). Denying login.',
+          );
         }
         throw Exception('Invalid username or password.');
       }
 
       // Offline connection fallback for pre-configured test credentials
       if (kDebugMode) {
-        print('[AuthRepository] Network connection error ($e). Checking offline fallback test credentials...');
+        print(
+          '[AuthRepository] Network connection error ($e). Checking offline fallback test credentials...',
+        );
       }
 
       final fallbackUser = _getFallbackUser(cleanUsername, password);
@@ -163,7 +216,9 @@ class ApiAuthRepository implements AuthRepository {
         AuthorizationService.instance.initialize(user: fallbackUser);
 
         if (kDebugMode) {
-          print('[AuthRepository] Local offline fallback login successful for ${fallbackUser.username}');
+          print(
+            '[AuthRepository] Local offline fallback login successful for ${fallbackUser.username}',
+          );
         }
 
         return fallbackUser;

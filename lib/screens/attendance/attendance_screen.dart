@@ -23,10 +23,7 @@ import 'package:hero_app/widgets/dashboard/dashboard_sidebar.dart';
 class AttendanceScreen extends StatefulWidget {
   final AttendanceRepository? repository;
 
-  const AttendanceScreen({
-    super.key,
-    this.repository,
-  });
+  const AttendanceScreen({super.key, this.repository});
 
   @override
   State<AttendanceScreen> createState() => _AttendanceScreenState();
@@ -93,10 +90,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           .where((c) => c.isNotEmpty && c != 'N/A')
           .toSet()
           .toList();
-      final result = await _breakdownApi.fetchOpenIssues(chassisList: chassisList);
+      final result = await _breakdownApi.fetchOpenIssues(
+        chassisList: chassisList,
+      );
       if (!mounted) return;
       setState(() {
-        _openByChassis = Map<String, MachineOpenIssuesBucket>.from(result.byChassis);
+        _openByChassis = Map<String, MachineOpenIssuesBucket>.from(
+          result.byChassis,
+        );
         for (final row in result.results) {
           if (row.machineChassisNo.isNotEmpty) {
             _openByChassis[row.machineChassisNo] = row;
@@ -120,7 +121,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       for (final entry in _openByChassis.entries) {
         final keyLower = entry.key.toLowerCase().trim();
         if (keyLower == lower ||
-            (keyLower.isNotEmpty && (keyLower.contains(lower) || lower.contains(keyLower)))) {
+            (keyLower.isNotEmpty &&
+                (keyLower.contains(lower) || lower.contains(keyLower)))) {
           return entry.value;
         }
       }
@@ -226,22 +228,40 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 const SizedBox(height: 16),
                 Text(
                   machine.displayName,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                const Text('Is this machine working?', style: TextStyle(fontSize: 13, color: AppColors.mutedTextGray)),
+                const Text(
+                  'Is this machine working?',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.mutedTextGray,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
                     onPressed: () => Navigator.of(ctx).pop(true),
-                    icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-                    label: const Text('Working', style: TextStyle(fontWeight: FontWeight.bold)),
+                    icon: const Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'Working',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -252,11 +272,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   child: OutlinedButton.icon(
                     onPressed: () => Navigator.of(ctx).pop(false),
                     icon: const Icon(Icons.report_problem_outlined, size: 20),
-                    label: const Text('Not Working', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text(
+                      'Not Working',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.criticalRed,
                       side: const BorderSide(color: AppColors.criticalRed),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -294,21 +319,39 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text('What kind of issue?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.deepNavy)),
+                const Text(
+                  'What kind of issue?',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text(machine.displayName, style: const TextStyle(fontSize: 13, color: AppColors.mutedTextGray)),
+                Text(
+                  machine.displayName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.mutedTextGray,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    icon: const Icon(Icons.build_circle_outlined, size: 20),
-                    label: const Text('External (OEM Breakdown)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    icon: const Icon(Icons.handyman_outlined, size: 20),
+                    label: const Text(
+                      'Internal (Ops Stop)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -317,13 +360,18 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   width: double.infinity,
                   height: 46,
                   child: OutlinedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    icon: const Icon(Icons.handyman_outlined, size: 20),
-                    label: const Text('Internal (Ops Stop)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    icon: const Icon(Icons.build_circle_outlined, size: 20),
+                    label: const Text(
+                      'External (OEM Breakdown)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.deepNavy,
                       side: const BorderSide(color: AppColors.borderGray),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -355,7 +403,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       if (record != null) continue;
 
       final bucket = _issuesFor(m);
-      if (bucket?.hasOpenIssue == true || m.isMaintenance || m.isUnderBreakdown) continue;
+      if (bucket?.hasOpenIssue == true || m.isMaintenance || m.isUnderBreakdown)
+        continue;
 
       unmarked.add(m);
     }
@@ -372,7 +421,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
       if (working) {
         await _openMachineCapture(machine);
-        if (_controller.getTodayAttendanceForMachine(machine.chassisNumber) == null) {
+        if (_controller.getTodayAttendanceForMachine(machine.chassisNumber) ==
+            null) {
           return;
         }
       } else {
@@ -383,21 +433,23 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
     if (!mounted) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AttendanceCaptureScreen(
-          controller: _controller,
-          isCheckOut: false,
-          targetTeamMember: member,
-        ),
-      ),
-    ).then((_) {
-      if (mounted) {
-        _controller.fetchAuthorizedTeamMembers();
-        _controller.fetchHistory();
-        setState(() {});
-      }
-    });
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => AttendanceCaptureScreen(
+              controller: _controller,
+              isCheckOut: false,
+              targetTeamMember: member,
+            ),
+          ),
+        )
+        .then((_) {
+          if (mounted) {
+            _controller.fetchAuthorizedTeamMembers();
+            _controller.fetchHistory();
+            setState(() {});
+          }
+        });
   }
 
   void _toggleSidebar() {
@@ -409,11 +461,20 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void _handleSidebarRouteSelected(String route) {
     if (route == 'Dashboard') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.dashboard);
-    } else if (route == 'Total Machines' || route == 'Machines' || route == 'Online' || route == 'Offline' || route == 'Maintenance') {
+    } else if (route == 'Total Machines' ||
+        route == 'Machines' ||
+        route == 'Online' ||
+        route == 'Offline' ||
+        route == 'Maintenance') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.machines);
-    } else if (route == 'Machine Shifting' || route == 'Machine Transfers' || route == 'Transfers' || route == 'Shifting') {
+    } else if (route == 'Machine Shifting' ||
+        route == 'Machine Transfers' ||
+        route == 'Transfers' ||
+        route == 'Shifting') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.machineTransfers);
-    } else if (route == 'Live Tracking' || route == 'Live Status' || route == 'Map View') {
+    } else if (route == 'Live Tracking' ||
+        route == 'Live Status' ||
+        route == 'Map View') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.liveStatus);
     } else if (route == 'My Tasks' || route == 'Tasks') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.tasks);
@@ -421,7 +482,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       Navigator.of(context).pushReplacementNamed(AppRoutes.team);
     } else if (route == 'Vendors' || route == 'Partners') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.vendors);
-    } else if (route == 'Refuel Records' || route == 'Refuel' || route == 'Fuel Logs') {
+    } else if (route == 'Refuel Records' ||
+        route == 'Refuel' ||
+        route == 'Fuel Logs') {
       Navigator.of(context).pushNamed(AppRoutes.refuel);
     } else if (route == 'Users') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.users);
@@ -431,11 +494,15 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       // Already on Attendance Screen
     } else if (route == 'Expenses') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.expenses);
-    } else if (route == 'Stock & Spares' || route == 'Stock' || route == 'Inventory') {
+    } else if (route == 'Stock & Spares' ||
+        route == 'Stock' ||
+        route == 'Inventory') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.inventory);
     } else if (route == 'Breakdown' || route == 'Breakdowns') {
       Navigator.of(context).pushNamed(AppRoutes.breakdowns);
-    } else if (route == 'Alert Center' || route == 'Alerts' || route == 'Alert') {
+    } else if (route == 'Alert Center' ||
+        route == 'Alerts' ||
+        route == 'Alert') {
       Navigator.of(context).pushNamed(AppRoutes.alerts);
     } else if (route == 'Notifications') {
       Navigator.of(context).pushNamed(AppRoutes.notifications);
@@ -456,20 +523,27 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     final isMobile = mediaWidth < 640;
 
     final user = AuthStorageService().currentUser;
-    final userName = user?.displayName.isNotEmpty == true ? user!.displayName : (user?.username.isNotEmpty == true ? user!.username : 'User');
+    final userName = user?.displayName.isNotEmpty == true
+        ? user!.displayName
+        : (user?.username.isNotEmpty == true ? user!.username : 'User');
     final userRole = user?.role.isNotEmpty == true ? user!.role : 'ADMIN';
     final userInitials = user?.initials ?? 'U';
 
-    final bool isNormalEmployee = user != null &&
+    final bool isNormalEmployee =
+        user != null &&
         user.username.toLowerCase().startsWith('employee') &&
         !user.isAdmin;
 
-    final bool canApprove = !isNormalEmployee || AuthorizationService.instance.can('attendance.approve');
+    final bool canApprove =
+        !isNormalEmployee ||
+        AuthorizationService.instance.can('attendance.approve');
 
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, child) {
-        final pendingCount = _controller.history.where((r) => r.isPendingApproval || r.status == 'PENDING').length;
+        final pendingCount = _controller.history
+            .where((r) => r.isPendingApproval || r.status == 'PENDING')
+            .length;
         final assignedMachines = _controller.assignedMachines;
         final teamMembers = _controller.teamMembers;
 
@@ -529,16 +603,25 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                                     color: AppColors.lightGreenBg,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: const Icon(Icons.fingerprint_rounded, color: AppColors.primaryGreen, size: 24),
+                                  child: const Icon(
+                                    Icons.fingerprint_rounded,
+                                    color: AppColors.primaryGreen,
+                                    size: 24,
+                                  ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: const [
                                       Text(
                                         'Employee & Machine Attendance',
-                                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.deepNavy,
+                                        ),
                                       ),
                                       Text(
                                         'Daily Machine Attendance & Team Member Attendance on One Page',
@@ -557,11 +640,17 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                                   alignment: Alignment.center,
                                   children: [
                                     IconButton(
-                                      icon: const Icon(Icons.verified_user_outlined, color: AppColors.primaryGreen),
+                                      icon: const Icon(
+                                        Icons.verified_user_outlined,
+                                        color: AppColors.primaryGreen,
+                                      ),
                                       onPressed: () {
                                         Navigator.of(context).push(
                                           MaterialPageRoute(
-                                            builder: (_) => AttendanceApprovalScreen(controller: _controller),
+                                            builder: (_) =>
+                                                AttendanceApprovalScreen(
+                                                  controller: _controller,
+                                                ),
                                           ),
                                         );
                                       },
@@ -591,18 +680,26 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                                 ),
                               ],
                               IconButton(
-                                icon: const Icon(Icons.history_rounded, color: AppColors.deepNavy),
+                                icon: const Icon(
+                                  Icons.history_rounded,
+                                  color: AppColors.deepNavy,
+                                ),
                                 onPressed: () {
                                   Navigator.of(context).push(
                                     MaterialPageRoute(
-                                      builder: (_) => AttendanceHistoryScreen(controller: _controller),
+                                      builder: (_) => AttendanceHistoryScreen(
+                                        controller: _controller,
+                                      ),
                                     ),
                                   );
                                 },
                                 tooltip: 'Attendance History',
                               ),
                               IconButton(
-                                icon: const Icon(Icons.refresh_rounded, color: AppColors.deepNavy),
+                                icon: const Icon(
+                                  Icons.refresh_rounded,
+                                  color: AppColors.deepNavy,
+                                ),
                                 onPressed: _refreshAll,
                                 tooltip: 'Refresh Status',
                               ),
@@ -616,7 +713,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                       _buildSectionHeader(
                         icon: Icons.precision_manufacturing_rounded,
                         title: 'Machine Attendance',
-                        countText: '${assignedMachines.length} Assigned Machines',
+                        countText:
+                            '${assignedMachines.length} Assigned Machines',
                         markedBadgeText: '$markedMachineCount Marked Today',
                         color: AppColors.primaryGreen,
                       ),
@@ -681,11 +779,18 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.deepNavy,
+                    ),
                   ),
                   Text(
                     countText,
-                    style: const TextStyle(fontSize: 11, color: AppColors.mutedTextGray),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.mutedTextGray,
+                    ),
                   ),
                 ],
               ),
@@ -699,7 +804,11 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             ),
             child: Text(
               markedBadgeText,
-              style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
@@ -711,7 +820,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     if (_controller.isLoadingToday) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 20),
-        child: Center(child: CircularProgressIndicator(color: AppColors.primaryGreen)),
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.primaryGreen),
+        ),
       );
     }
 
@@ -726,11 +837,25 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         ),
         child: Column(
           children: const [
-            Icon(Icons.precision_manufacturing_outlined, size: 40, color: AppColors.mutedTextGray),
+            Icon(
+              Icons.precision_manufacturing_outlined,
+              size: 40,
+              color: AppColors.mutedTextGray,
+            ),
             SizedBox(height: 10),
-            Text('No Machine Assigned', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.deepNavy)),
+            Text(
+              'No Machine Assigned',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: AppColors.deepNavy,
+              ),
+            ),
             SizedBox(height: 4),
-            Text('You do not have any active machine assignment.', style: TextStyle(color: AppColors.mutedTextGray, fontSize: 12)),
+            Text(
+              'You do not have any active machine assignment.',
+              style: TextStyle(color: AppColors.mutedTextGray, fontSize: 12),
+            ),
           ],
         ),
       );
@@ -752,7 +877,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     if (_controller.isLoadingHistory) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 20),
-        child: Center(child: CircularProgressIndicator(color: AppColors.primaryGreen)),
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.primaryGreen),
+        ),
       );
     }
 
@@ -769,11 +896,28 @@ class _AttendanceScreenState extends State<AttendanceScreen>
             ),
             child: Column(
               children: const [
-                Icon(Icons.people_outline_rounded, size: 40, color: AppColors.mutedTextGray),
+                Icon(
+                  Icons.people_outline_rounded,
+                  size: 40,
+                  color: AppColors.mutedTextGray,
+                ),
                 SizedBox(height: 10),
-                Text('No Authorized Team Members', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.deepNavy)),
+                Text(
+                  'No Authorized Team Members',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
+                ),
                 SizedBox(height: 4),
-                Text('You do not have any employees assigned under your team authority.', style: TextStyle(color: AppColors.mutedTextGray, fontSize: 12)),
+                Text(
+                  'You do not have any employees assigned under your team authority.',
+                  style: TextStyle(
+                    color: AppColors.mutedTextGray,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           )
@@ -793,19 +937,27 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   }
 
   Widget _buildMachineTile(Machine machine) {
-    final todayRecord = _controller.getTodayAttendanceForMachine(machine.chassisNumber);
+    final todayRecord = _controller.getTodayAttendanceForMachine(
+      machine.chassisNumber,
+    );
     final bool isMarked = todayRecord != null;
     final openBucket = _issuesFor(machine);
     final hasOpenIssue = openBucket?.hasOpenIssue == true;
     final openCount = openBucket?.openCount ?? 0;
-    final topIssue = (openBucket?.issues.isNotEmpty == true) ? openBucket!.issues.first : null;
+    final topIssue = (openBucket?.issues.isNotEmpty == true)
+        ? openBucket!.issues.first
+        : null;
 
     return AnimatedBuilder(
       animation: _blinkController,
       builder: (context, child) {
         final borderColor = hasOpenIssue
-            ? AppColors.criticalRed.withValues(alpha: 0.35 + (_blinkController.value * 0.55))
-            : (isMarked ? AppColors.primaryGreen.withValues(alpha: 0.4) : AppColors.borderGray);
+            ? AppColors.criticalRed.withValues(
+                alpha: 0.35 + (_blinkController.value * 0.55),
+              )
+            : (isMarked
+                  ? AppColors.primaryGreen.withValues(alpha: 0.4)
+                  : AppColors.borderGray);
         final bgColor = hasOpenIssue
             ? Color.lerp(
                 AppColors.white,
@@ -819,13 +971,22 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor, width: hasOpenIssue ? 1.6 : 1),
+            border: Border.all(
+              color: borderColor,
+              width: hasOpenIssue ? 1.6 : 1,
+            ),
             boxShadow: const [
-              BoxShadow(color: Color(0x05000000), blurRadius: 4, offset: Offset(0, 2)),
+              BoxShadow(
+                color: Color(0x05000000),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
             ],
           ),
           child: Opacity(
-            opacity: hasOpenIssue ? (0.92 + (_blinkController.value * 0.08)) : 1,
+            opacity: hasOpenIssue
+                ? (0.92 + (_blinkController.value * 0.08))
+                : 1,
             child: child,
           ),
         );
@@ -842,17 +1003,22 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: (hasOpenIssue
-                                ? AppColors.criticalRed
-                                : (isMarked ? AppColors.primaryGreen : AppColors.deepNavy))
-                            .withValues(alpha: 0.12),
+                        color:
+                            (hasOpenIssue
+                                    ? AppColors.criticalRed
+                                    : (isMarked
+                                          ? AppColors.primaryGreen
+                                          : AppColors.deepNavy))
+                                .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
                         Icons.precision_manufacturing_rounded,
                         color: hasOpenIssue
                             ? AppColors.criticalRed
-                            : (isMarked ? AppColors.primaryGreen : AppColors.deepNavy),
+                            : (isMarked
+                                  ? AppColors.primaryGreen
+                                  : AppColors.deepNavy),
                         size: 22,
                       ),
                     ),
@@ -863,13 +1029,21 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                         children: [
                           Text(
                             machine.displayName,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.deepNavy),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: AppColors.deepNavy,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                           Text(
                             'Chassis: ${machine.chassisNumber}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.mutedTextGray, fontFamily: 'monospace'),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.mutedTextGray,
+                              fontFamily: 'monospace',
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -881,13 +1055,20 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               ),
               if (hasOpenIssue)
                 FadeTransition(
-                  opacity: _blinkController.drive(CurveTween(curve: Curves.easeInOut)),
+                  opacity: _blinkController.drive(
+                    CurveTween(curve: Curves.easeInOut),
+                  ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.criticalRed.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.35)),
+                      border: Border.all(
+                        color: AppColors.criticalRed.withValues(alpha: 0.35),
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -895,12 +1076,21 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                         Container(
                           width: 7,
                           height: 7,
-                          decoration: const BoxDecoration(color: AppColors.criticalRed, shape: BoxShape.circle),
+                          decoration: const BoxDecoration(
+                            color: AppColors.criticalRed,
+                            shape: BoxShape.circle,
+                          ),
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          openCount > 1 ? 'UNDER BREAKDOWN ($openCount)' : 'UNDER BREAKDOWN',
-                          style: const TextStyle(color: AppColors.criticalRed, fontSize: 10, fontWeight: FontWeight.bold),
+                          openCount > 1
+                              ? 'UNDER BREAKDOWN ($openCount)'
+                              : 'UNDER BREAKDOWN',
+                          style: const TextStyle(
+                            color: AppColors.criticalRed,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -908,44 +1098,49 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 )
               else if (isMarked)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: (!todayRecord.isSynced
-                            ? AppColors.infoBlue
-                            : todayRecord.isApproved
+                    color:
+                        (!todayRecord.isSynced
+                                ? AppColors.infoBlue
+                                : todayRecord.isApproved
                                 ? AppColors.successGreen
                                 : todayRecord.isRejected
-                                    ? AppColors.criticalRed
-                                    : AppColors.warningAmber)
-                        .withValues(alpha: 0.12),
+                                ? AppColors.criticalRed
+                                : AppColors.warningAmber)
+                            .withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: (!todayRecord.isSynced
-                              ? AppColors.infoBlue
-                              : todayRecord.isApproved
+                      color:
+                          (!todayRecord.isSynced
+                                  ? AppColors.infoBlue
+                                  : todayRecord.isApproved
                                   ? AppColors.successGreen
                                   : todayRecord.isRejected
-                                      ? AppColors.criticalRed
-                                      : AppColors.warningAmber)
-                          .withValues(alpha: 0.3),
+                                  ? AppColors.criticalRed
+                                  : AppColors.warningAmber)
+                              .withValues(alpha: 0.3),
                     ),
                   ),
                   child: Text(
                     !todayRecord.isSynced
                         ? '• OFFLINE (PENDING SYNC)'
                         : todayRecord.isApproved
-                            ? '• APPROVED'
-                            : todayRecord.isRejected
-                                ? '• REJECTED'
-                                : '• PENDING APPROVAL',
+                        ? '• APPROVED'
+                        : todayRecord.isRejected
+                        ? '• REJECTED'
+                        : '• PENDING APPROVAL',
                     style: TextStyle(
                       color: !todayRecord.isSynced
                           ? AppColors.infoBlue
                           : todayRecord.isApproved
-                              ? AppColors.successGreen
-                              : todayRecord.isRejected
-                                  ? AppColors.criticalRed
-                                  : AppColors.warningAmber,
+                          ? AppColors.successGreen
+                          : todayRecord.isRejected
+                          ? AppColors.criticalRed
+                          : AppColors.warningAmber,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
@@ -953,12 +1148,22 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.successGreen.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Text('• ASSIGNED', style: TextStyle(color: AppColors.successGreen, fontSize: 10, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    '• ASSIGNED',
+                    style: TextStyle(
+                      color: AppColors.successGreen,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -971,19 +1176,32 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               decoration: BoxDecoration(
                 color: AppColors.criticalRed.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.2)),
+                border: Border.all(
+                  color: AppColors.criticalRed.withValues(alpha: 0.2),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${topIssue.isOem ? 'OEM' : 'Ops'} ${topIssue.ttNumber ?? ''}'.trim(),
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.criticalRed),
+                    '${topIssue.isOem ? 'OEM' : 'Ops'} ${topIssue.ttNumber ?? ''}'
+                        .trim(),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.criticalRed,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    topIssue.reason.isNotEmpty ? topIssue.reason : 'Open issue — close before attendance',
-                    style: const TextStyle(fontSize: 12, color: AppColors.deepNavy, fontWeight: FontWeight.w600),
+                    topIssue.reason.isNotEmpty
+                        ? topIssue.reason
+                        : 'Open issue — close before attendance',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.deepNavy,
+                      fontWeight: FontWeight.w600,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1000,9 +1218,22 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Model', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray)),
+                    const Text(
+                      'Model',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(machine.model, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.deepNavy)),
+                    Text(
+                      machine.model,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.deepNavy,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1010,11 +1241,21 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Site Location', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray)),
+                    const Text(
+                      'Site Location',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       machine.site,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.deepNavy,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1032,16 +1273,26 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               decoration: BoxDecoration(
                 color: AppColors.lightGreenBg,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.primaryGreen.withValues(alpha: 0.2)),
+                border: Border.all(
+                  color: AppColors.primaryGreen.withValues(alpha: 0.2),
+                ),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primaryGreen),
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 16,
+                    color: AppColors.primaryGreen,
+                  ),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Machine Attendance Marked Today',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primaryGreen),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryGreen,
+                      ),
                     ),
                   ),
                 ],
@@ -1053,11 +1304,24 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _openIssueTypeGate(machine),
-                    icon: const Icon(Icons.report_problem_outlined, size: 16, color: AppColors.criticalRed),
-                    label: const Text('Report Breakdown', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.criticalRed)),
+                    icon: const Icon(
+                      Icons.report_problem_outlined,
+                      size: 16,
+                      color: AppColors.criticalRed,
+                    ),
+                    label: const Text(
+                      'Report Breakdown',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.criticalRed,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.criticalRed),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -1074,8 +1338,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                     );
                   },
                   icon: const Icon(Icons.visibility_outlined, size: 16),
-                  label: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  style: TextButton.styleFrom(foregroundColor: AppColors.deepNavy),
+                  label: const Text(
+                    'View',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.deepNavy,
+                  ),
                 ),
               ],
             ),
@@ -1085,15 +1354,29 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               height: 40,
               child: ElevatedButton.icon(
                 onPressed: () => _onMarkMachineAttendancePressed(machine),
-                icon: Icon(hasOpenIssue ? Icons.warning_amber_rounded : Icons.fingerprint_rounded, size: 18),
+                icon: Icon(
+                  hasOpenIssue
+                      ? Icons.warning_amber_rounded
+                      : Icons.fingerprint_rounded,
+                  size: 18,
+                ),
                 label: Text(
-                  hasOpenIssue ? 'Resolve issues & mark attendance' : 'Mark Machine Attendance',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  hasOpenIssue
+                      ? 'Resolve issues & mark attendance'
+                      : 'Mark Machine Attendance',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: hasOpenIssue ? AppColors.criticalRed : AppColors.primaryGreen,
+                  backgroundColor: hasOpenIssue
+                      ? AppColors.criticalRed
+                      : AppColors.primaryGreen,
                   foregroundColor: AppColors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),
@@ -1118,10 +1401,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         color: AppColors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isMarked ? AppColors.primaryGreen.withValues(alpha: 0.4) : AppColors.borderGray,
+          color: isMarked
+              ? AppColors.primaryGreen.withValues(alpha: 0.4)
+              : AppColors.borderGray,
         ),
         boxShadow: const [
-          BoxShadow(color: Color(0x05000000), blurRadius: 4, offset: Offset(0, 2)),
+          BoxShadow(
+            color: Color(0x05000000),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
         ],
       ),
       child: Column(
@@ -1135,12 +1424,18 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: (isMarked ? AppColors.primaryGreen : AppColors.deepNavy).withValues(alpha: 0.15),
+                      backgroundColor:
+                          (isMarked
+                                  ? AppColors.primaryGreen
+                                  : AppColors.deepNavy)
+                              .withValues(alpha: 0.15),
                       child: Text(
                         member.initials,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: isMarked ? AppColors.primaryGreen : AppColors.deepNavy,
+                          color: isMarked
+                              ? AppColors.primaryGreen
+                              : AppColors.deepNavy,
                           fontSize: 13,
                         ),
                       ),
@@ -1152,13 +1447,20 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                         children: [
                           Text(
                             member.displayName,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.deepNavy),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: AppColors.deepNavy,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                           Text(
                             'ID: ${member.displayEmployeeId} · ${member.role}',
-                            style: const TextStyle(fontSize: 11, color: AppColors.mutedTextGray),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.mutedTextGray,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1170,44 +1472,49 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               ),
               if (isMarked)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: (!todayRecord.isSynced
-                            ? AppColors.infoBlue
-                            : todayRecord.isApproved
+                    color:
+                        (!todayRecord.isSynced
+                                ? AppColors.infoBlue
+                                : todayRecord.isApproved
                                 ? AppColors.successGreen
                                 : todayRecord.isRejected
-                                    ? AppColors.criticalRed
-                                    : AppColors.warningAmber)
-                        .withValues(alpha: 0.12),
+                                ? AppColors.criticalRed
+                                : AppColors.warningAmber)
+                            .withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: (!todayRecord.isSynced
-                              ? AppColors.infoBlue
-                              : todayRecord.isApproved
+                      color:
+                          (!todayRecord.isSynced
+                                  ? AppColors.infoBlue
+                                  : todayRecord.isApproved
                                   ? AppColors.successGreen
                                   : todayRecord.isRejected
-                                      ? AppColors.criticalRed
-                                      : AppColors.warningAmber)
-                          .withValues(alpha: 0.3),
+                                  ? AppColors.criticalRed
+                                  : AppColors.warningAmber)
+                              .withValues(alpha: 0.3),
                     ),
                   ),
                   child: Text(
                     !todayRecord.isSynced
                         ? '• OFFLINE (PENDING SYNC)'
                         : todayRecord.isApproved
-                            ? '• APPROVED'
-                            : todayRecord.isRejected
-                                ? '• REJECTED'
-                                : '• PENDING APPROVAL',
+                        ? '• APPROVED'
+                        : todayRecord.isRejected
+                        ? '• REJECTED'
+                        : '• PENDING APPROVAL',
                     style: TextStyle(
                       color: !todayRecord.isSynced
                           ? AppColors.infoBlue
                           : todayRecord.isApproved
-                              ? AppColors.successGreen
-                              : todayRecord.isRejected
-                                  ? AppColors.criticalRed
-                                  : AppColors.warningAmber,
+                          ? AppColors.successGreen
+                          : todayRecord.isRejected
+                          ? AppColors.criticalRed
+                          : AppColors.warningAmber,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
@@ -1222,20 +1529,33 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               children: [
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.lightGreenBg,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.primaryGreen.withValues(alpha: 0.2)),
+                      border: Border.all(
+                        color: AppColors.primaryGreen.withValues(alpha: 0.2),
+                      ),
                     ),
                     child: const Row(
                       children: [
-                        Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primaryGreen),
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 16,
+                          color: AppColors.primaryGreen,
+                        ),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Attendance Marked Today',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primaryGreen),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primaryGreen,
+                            ),
                           ),
                         ),
                       ],
@@ -1255,8 +1575,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                     );
                   },
                   icon: const Icon(Icons.visibility_outlined, size: 16),
-                  label: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  style: TextButton.styleFrom(foregroundColor: AppColors.deepNavy),
+                  label: const Text(
+                    'View',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.deepNavy,
+                  ),
                 ),
               ],
             ),
@@ -1269,12 +1594,17 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 icon: const Icon(Icons.camera_alt_outlined, size: 16),
                 label: Text(
                   'Mark Attendance for ${member.displayName.split(' ').first}',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppColors.primaryGreen),
                   foregroundColor: AppColors.primaryGreen,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),

@@ -29,7 +29,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>HERO APP needs camera access to capture attendance selfies and expense receipt photos.</string>
+	<string>HERO APP needs camera access to capture attendance selfies, expense receipts, and CCN evidence.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>HERO APP needs microphone access to record audio with CCN walkthrough videos.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>HERO APP needs your location to record attendance check-in and verify on-site work.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

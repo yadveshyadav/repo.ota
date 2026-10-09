@@ -26,11 +26,7 @@ class DashboardScreen extends StatefulWidget {
   final DashboardRepository? repository;
   final MachineRepository? machineRepository;
 
-  const DashboardScreen({
-    super.key,
-    this.repository,
-    this.machineRepository,
-  });
+  const DashboardScreen({super.key, this.repository, this.machineRepository});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -59,7 +55,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _repository = widget.repository ?? ApiDashboardRepository();
-    _machineRepository = widget.machineRepository ??
+    _machineRepository =
+        widget.machineRepository ??
         (widget.repository is MockDashboardRepository
             ? MockMachineRepository()
             : ApiMachineRepository());
@@ -132,7 +129,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               totalMachines: summary.totalMachines,
               onlineMachines: summary.onlineMachines,
               offlineMachines: summary.offlineMachines,
-              maintenanceMachines: summary.maintenanceMachines > issueRes.totalOpen ? summary.maintenanceMachines : issueRes.totalOpen,
+              maintenanceMachines:
+                  summary.maintenanceMachines > issueRes.totalOpen
+                  ? summary.maintenanceMachines
+                  : issueRes.totalOpen,
               userName: summary.userName,
               projectName: summary.projectName,
               currentDate: summary.currentDate,
@@ -179,10 +179,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         route == 'Online' ||
         route == 'Idle' ||
         route == 'Offline' ||
-        route == 'Maintenance' ||
-        route == 'Breakdown') {
+        route == 'Maintenance') {
       _navigateToMachines(route);
-    } else if (route == 'Machine Shifting' || route == 'Machine Transfers' || route == 'Transfers' || route == 'Shifting') {
+    } else if (route == 'Machine Shifting' ||
+        route == 'Machine Transfers' ||
+        route == 'Transfers' ||
+        route == 'Shifting') {
       Navigator.of(context).pushNamed(AppRoutes.machineTransfers);
     } else if (route == 'Online') {
       _navigateToMachines('Online');
@@ -190,10 +192,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _navigateToMachines('Offline');
     } else if (route == 'Maintenance') {
       _navigateToMachines('Maintenance');
-    } else if (route == 'Live Tracking' || route == 'Live Status' || route == 'Map View') {
+    } else if (route == 'Live Tracking' ||
+        route == 'Live Status' ||
+        route == 'Map View') {
       Navigator.of(context).pushNamed(AppRoutes.liveStatus);
     } else if (route == 'My Tasks' || route == 'Tasks') {
       Navigator.of(context).pushNamed(AppRoutes.tasks);
+    } else if (route == 'Hindrance') {
+      Navigator.of(context).pushNamed(AppRoutes.hindrance);
+    } else if (route == 'CCN') {
+      Navigator.of(context).pushNamed(AppRoutes.ccn);
     } else if (route == 'Team') {
       Navigator.of(context).pushNamed(AppRoutes.team);
     } else if (route == 'Vendors' || route == 'Partners') {
@@ -208,15 +216,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Navigator.of(context).pushNamed(AppRoutes.breakdowns);
     } else if (route == 'Expenses') {
       Navigator.of(context).pushNamed(AppRoutes.expenses);
-    } else if (route == 'Stock & Spares' || route == 'Stock' || route == 'Inventory') {
+    } else if (route == 'Stock & Spares' ||
+        route == 'Stock' ||
+        route == 'Inventory') {
       Navigator.of(context).pushNamed(AppRoutes.inventory);
-    } else if (route == 'Refuel Records' || route == 'Refuel' || route == 'Fuel Logs') {
+    } else if (route == 'Refuel Records' ||
+        route == 'Refuel' ||
+        route == 'Fuel Logs') {
       Navigator.of(context).pushNamed(AppRoutes.refuel);
-    } else if (route == 'Alert Center' || route == 'Alerts' || route == 'Alert') {
+    } else if (route == 'Alert Center' ||
+        route == 'Alerts' ||
+        route == 'Alert') {
       Navigator.of(context).pushNamed(AppRoutes.alerts);
     } else if (route == 'Notifications') {
       Navigator.of(context).pushNamed(AppRoutes.notifications);
-    } else if (route == 'Check for App Update' || route == 'Check for Updates' || route == 'Update') {
+    } else if (route == 'Check for App Update' ||
+        route == 'Check for Updates' ||
+        route == 'Update') {
       OtaUpdateDialogs.performAppUpdateCheck(context, isManualCheck: true);
     } else {
       setState(() {
@@ -255,29 +271,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final isMobile = mediaWidth < 640;
 
     final user = AuthStorageService().currentUser;
-    final userName = user?.displayName.isNotEmpty == true ? user!.displayName : (user?.username.isNotEmpty == true ? user!.username : 'User');
+    final userName = user?.displayName.isNotEmpty == true
+        ? user!.displayName
+        : (user?.username.isNotEmpty == true ? user!.username : 'User');
     final userRole = user?.role.isNotEmpty == true ? user!.role : 'ADMIN';
     final userInitials = user?.initials ?? 'U';
 
     final totalMachinesCount = _machineController.state.totalMachines > 0
         ? _machineController.state.totalMachines
-        : ((_summary?.totalMachines ?? 0) > 0 ? _summary!.totalMachines : (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.length : 33));
+        : ((_summary?.totalMachines ?? 0) > 0
+              ? _summary!.totalMachines
+              : (_machineController.state.machines.isNotEmpty
+                    ? _machineController.state.machines.length
+                    : 33));
 
-    final commissionedMachinesCount = _machineController.state.machines.isNotEmpty
-        ? _machineController.state.machines.where((m) => m.isCommissioned == true).length
+    final commissionedMachinesCount =
+        _machineController.state.machines.isNotEmpty
+        ? _machineController.state.machines
+              .where((m) => m.isCommissioned == true)
+              .length
         : (_summary?.commissionedMachines ?? 18);
 
     final onlineMachinesCount = _machineController.state.runningMachines > 0
         ? _machineController.state.runningMachines
-        : (_summary?.onlineMachines ?? (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.where((m) => m.isWorking).length : 8));
+        : (_summary?.onlineMachines ??
+              (_machineController.state.machines.isNotEmpty
+                  ? _machineController.state.machines
+                        .where((m) => m.isWorking)
+                        .length
+                  : 8));
 
     final idleMachinesCount = _machineController.state.idleMachines > 0
         ? _machineController.state.idleMachines
-        : (_summary?.idleMachines ?? (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.where((m) => m.isIdle).length : 16));
+        : (_summary?.idleMachines ??
+              (_machineController.state.machines.isNotEmpty
+                  ? _machineController.state.machines
+                        .where((m) => m.isIdle)
+                        .length
+                  : 16));
 
     final offlineMachinesCount = _machineController.state.offlineMachines > 0
         ? _machineController.state.offlineMachines
-        : (_summary?.offlineMachines ?? (_machineController.state.machines.isNotEmpty ? _machineController.state.machines.where((m) => m.isOffline).length : 6));
+        : (_summary?.offlineMachines ??
+              (_machineController.state.machines.isNotEmpty
+                  ? _machineController.state.machines
+                        .where((m) => m.isOffline)
+                        .length
+                  : 6));
 
     final breakdownCountFromList = _machineController.state.machines
         .where((m) => m.isMaintenance || m.isUnderBreakdown)
@@ -286,8 +326,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final maintenanceMachinesCount = breakdownCountFromList > 0
         ? breakdownCountFromList
         : (_machineController.state.maintenanceMachines > 0
-            ? _machineController.state.maintenanceMachines
-            : (_summary?.maintenanceMachines ?? 3));
+              ? _machineController.state.maintenanceMachines
+              : (_summary?.maintenanceMachines ?? 3));
 
     return Scaffold(
       key: _scaffoldKey,
@@ -345,58 +385,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: _isLoading
                 ? _buildSkeletonLoading(isMobile)
                 : _errorMessage != null
-                    ? _buildErrorView()
-                    : RefreshIndicator(
-                        onRefresh: _loadDashboardData,
-                        color: AppColors.primaryGreen,
-                        child: SingleChildScrollView(
-                          padding: EdgeInsets.all(isMobile ? 12.0 : 20.0),
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 2. Single 4-Card Top Summary Row (Machines, Attendance, Breakdown, Alerts)
-                              if (_summary != null)
-                                SummaryCardsRow(
-                                  summary: _summary!,
-                                  machineState: _machineController.state,
-                                  alertsCount: _alerts?.length,
-                                  isMobile: isMobile,
-                                  onCardTap: (filter) =>
-                                      _handleRouteSelected(filter),
-                                ),
+                ? _buildErrorView()
+                : RefreshIndicator(
+                    onRefresh: _loadDashboardData,
+                    color: AppColors.primaryGreen,
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.all(isMobile ? 12.0 : 20.0),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 2. Single 4-Card Top Summary Row (Machines, Attendance, Breakdown, Alerts)
+                          if (_summary != null)
+                            SummaryCardsRow(
+                              summary: _summary!,
+                              machineState: _machineController.state,
+                              alertsCount: _alerts?.length,
+                              isMobile: isMobile,
+                              onCardTap: (filter) =>
+                                  _handleRouteSelected(filter),
+                            ),
 
-                              const SizedBox(height: 16),
+                          const SizedBox(height: 16),
 
-                              // 4. Machine Status & Fuel Status Cards
-                              MachineAndFuelStatusRow(
-                                onViewAllMachines: () =>
-                                    _navigateToMachines('All'),
-                                machineStatusWidget: _summary?.machineStatusWidget,
-                                fuelStatusWidget: _summary?.fuelStatusWidget,
-                              ),
-
-                              const SizedBox(height: 16),
-
-                              // 6. My Task (Today) Section
-                              const MyTasksCard(),
-
-                              const SizedBox(height: 16),
-
-                              // 7. Active Alerts Card
-                              if (_alerts != null)
-                                ActiveAlertsCard(
-                                  alerts: _alerts!,
-                                  onViewAllPressed: () {
-                                    Navigator.of(context).pushNamed(AppRoutes.alerts);
-                                  },
-                                ),
-
-                              const SizedBox(height: 32),
-                            ],
+                          // 4. Machine Status & Fuel Status Cards
+                          MachineAndFuelStatusRow(
+                            onViewAllMachines: () => _navigateToMachines('All'),
+                            machineStatusWidget: _summary?.machineStatusWidget,
+                            fuelStatusWidget: _summary?.fuelStatusWidget,
                           ),
-                        ),
+
+                          const SizedBox(height: 16),
+
+                          // 6. My Task (Today) Section
+                          const MyTasksCard(),
+
+                          const SizedBox(height: 16),
+
+                          // 7. Active Alerts Card
+                          if (_alerts != null)
+                            ActiveAlertsCard(
+                              alerts: _alerts!,
+                              onViewAllPressed: () {
+                                Navigator.of(
+                                  context,
+                                ).pushNamed(AppRoutes.alerts);
+                              },
+                            ),
+
+                          const SizedBox(height: 32),
+                        ],
                       ),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -423,7 +464,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 24),
-          const Expanded(child: SkeletonBox(width: double.infinity, height: double.infinity)),
+          const Expanded(
+            child: SkeletonBox(width: double.infinity, height: double.infinity),
+          ),
         ],
       ),
     );
@@ -436,8 +479,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded,
-                size: 48, color: AppColors.criticalRed),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 48,
+              color: AppColors.criticalRed,
+            ),
             const SizedBox(height: 16),
             Text(
               _errorMessage ?? 'Unable to load dashboard data',

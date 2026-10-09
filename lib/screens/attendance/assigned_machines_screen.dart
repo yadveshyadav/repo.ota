@@ -13,10 +13,7 @@ import 'package:hero_app/services/api/breakdown_api_service.dart';
 class AssignedMachinesScreen extends StatefulWidget {
   final AttendanceController controller;
 
-  const AssignedMachinesScreen({
-    super.key,
-    required this.controller,
-  });
+  const AssignedMachinesScreen({super.key, required this.controller});
 
   @override
   State<AssignedMachinesScreen> createState() => _AssignedMachinesScreenState();
@@ -71,10 +68,14 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
           .where((c) => c.isNotEmpty && c != 'N/A')
           .toSet()
           .toList();
-      final result = await _breakdownApi.fetchOpenIssues(chassisList: chassisList);
+      final result = await _breakdownApi.fetchOpenIssues(
+        chassisList: chassisList,
+      );
       if (!mounted) return;
       setState(() {
-        _openByChassis = Map<String, MachineOpenIssuesBucket>.from(result.byChassis);
+        _openByChassis = Map<String, MachineOpenIssuesBucket>.from(
+          result.byChassis,
+        );
         // also index results
         for (final row in result.results) {
           if (row.machineChassisNo.isNotEmpty) {
@@ -103,7 +104,8 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
       for (final entry in _openByChassis.entries) {
         final keyLower = entry.key.toLowerCase().trim();
         if (keyLower == lower ||
-            (keyLower.isNotEmpty && (keyLower.contains(lower) || lower.contains(keyLower)))) {
+            (keyLower.isNotEmpty &&
+                (keyLower.contains(lower) || lower.contains(keyLower)))) {
           return entry.value;
         }
       }
@@ -154,7 +156,9 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
       }
     } catch (e) {
       if (kDebugMode) {
-        print('[AssignedMachinesScreen] fetchOpenIssues non-blocking error ($e)');
+        print(
+          '[AssignedMachinesScreen] fetchOpenIssues non-blocking error ($e)',
+        );
       }
     }
 
@@ -234,7 +238,10 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 const SizedBox(height: 4),
                 const Text(
                   'Is this machine working?',
-                  style: TextStyle(fontSize: 13, color: AppColors.mutedTextGray),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.mutedTextGray,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -242,12 +249,20 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                   height: 46,
                   child: ElevatedButton.icon(
                     onPressed: () => Navigator.of(ctx).pop(true),
-                    icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-                    label: const Text('Working', style: TextStyle(fontWeight: FontWeight.bold)),
+                    icon: const Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 20,
+                    ),
+                    label: const Text(
+                      'Working',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -258,11 +273,16 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                   child: OutlinedButton.icon(
                     onPressed: () => Navigator.of(ctx).pop(false),
                     icon: const Icon(Icons.report_problem_outlined, size: 20),
-                    label: const Text('Not Working', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text(
+                      'Not Working',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.criticalRed,
                       side: const BorderSide(color: AppColors.criticalRed),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -320,20 +340,28 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 const SizedBox(height: 4),
                 Text(
                   machine.displayName,
-                  style: const TextStyle(fontSize: 13, color: AppColors.mutedTextGray),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.mutedTextGray,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    icon: const Icon(Icons.build_circle_outlined, size: 20),
-                    label: const Text('External (OEM Breakdown)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    icon: const Icon(Icons.handyman_outlined, size: 20),
+                    label: const Text(
+                      'Internal (Ops Stop)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primaryGreen,
                       foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -342,13 +370,18 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                   width: double.infinity,
                   height: 46,
                   child: OutlinedButton.icon(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    icon: const Icon(Icons.handyman_outlined, size: 20),
-                    label: const Text('Internal (Ops Stop)', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    icon: const Icon(Icons.build_circle_outlined, size: 20),
+                    label: const Text(
+                      'External (OEM Breakdown)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.deepNavy,
                       side: const BorderSide(color: AppColors.borderGray),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -389,7 +422,11 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
               children: [
                 Text(
                   'My Assigned Machines',
-                  style: TextStyle(color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: AppColors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 Text(
                   'Select an assigned machine to mark attendance',
@@ -398,7 +435,10 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
               ],
             ),
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: AppColors.white),
+              icon: const Icon(
+                Icons.arrow_back_rounded,
+                color: AppColors.white,
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: [
@@ -408,7 +448,10 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                   child: SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
                   ),
                 ),
               IconButton(
@@ -418,18 +461,22 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
             ],
           ),
           body: isLoading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primaryGreen))
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: AppColors.primaryGreen,
+                  ),
+                )
               : assignedMachines.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: assignedMachines.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final machine = assignedMachines[index];
-                        return _buildMachineTile(machine);
-                      },
-                    ),
+              ? _buildEmptyState()
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: assignedMachines.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final machine = assignedMachines[index];
+                    return _buildMachineTile(machine);
+                  },
+                ),
         );
       },
     );
@@ -442,11 +489,19 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.precision_manufacturing_outlined, size: 52, color: AppColors.mutedTextGray),
+            Icon(
+              Icons.precision_manufacturing_outlined,
+              size: 52,
+              color: AppColors.mutedTextGray,
+            ),
             SizedBox(height: 16),
             Text(
               'No Machine Assigned',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppColors.deepNavy,
+              ),
             ),
             SizedBox(height: 6),
             Text(
@@ -461,19 +516,27 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
   }
 
   Widget _buildMachineTile(Machine machine) {
-    final todayRecord = widget.controller.getTodayAttendanceForMachine(machine.chassisNumber);
+    final todayRecord = widget.controller.getTodayAttendanceForMachine(
+      machine.chassisNumber,
+    );
     final bool isMarked = todayRecord != null;
     final openBucket = _issuesFor(machine);
     final hasOpenIssue = openBucket?.hasOpenIssue == true;
     final openCount = openBucket?.openCount ?? 0;
-    final topIssue = (openBucket?.issues.isNotEmpty == true) ? openBucket!.issues.first : null;
+    final topIssue = (openBucket?.issues.isNotEmpty == true)
+        ? openBucket!.issues.first
+        : null;
 
     return AnimatedBuilder(
       animation: _blinkController,
       builder: (context, child) {
         final borderColor = hasOpenIssue
-            ? AppColors.criticalRed.withValues(alpha: 0.35 + (_blinkController.value * 0.55))
-            : (isMarked ? AppColors.primaryGreen.withValues(alpha: 0.4) : AppColors.borderGray);
+            ? AppColors.criticalRed.withValues(
+                alpha: 0.35 + (_blinkController.value * 0.55),
+              )
+            : (isMarked
+                  ? AppColors.primaryGreen.withValues(alpha: 0.4)
+                  : AppColors.borderGray);
         final bgColor = hasOpenIssue
             ? Color.lerp(
                 AppColors.white,
@@ -487,13 +550,22 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor, width: hasOpenIssue ? 1.6 : 1),
+            border: Border.all(
+              color: borderColor,
+              width: hasOpenIssue ? 1.6 : 1,
+            ),
             boxShadow: const [
-              BoxShadow(color: Color(0x05000000), blurRadius: 4, offset: Offset(0, 2)),
+              BoxShadow(
+                color: Color(0x05000000),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
             ],
           ),
           child: Opacity(
-            opacity: hasOpenIssue ? (0.92 + (_blinkController.value * 0.08)) : 1,
+            opacity: hasOpenIssue
+                ? (0.92 + (_blinkController.value * 0.08))
+                : 1,
             child: child,
           ),
         );
@@ -510,17 +582,22 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: (hasOpenIssue
-                                ? AppColors.criticalRed
-                                : (isMarked ? AppColors.primaryGreen : AppColors.deepNavy))
-                            .withValues(alpha: 0.12),
+                        color:
+                            (hasOpenIssue
+                                    ? AppColors.criticalRed
+                                    : (isMarked
+                                          ? AppColors.primaryGreen
+                                          : AppColors.deepNavy))
+                                .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
                         Icons.precision_manufacturing_rounded,
                         color: hasOpenIssue
                             ? AppColors.criticalRed
-                            : (isMarked ? AppColors.primaryGreen : AppColors.deepNavy),
+                            : (isMarked
+                                  ? AppColors.primaryGreen
+                                  : AppColors.deepNavy),
                         size: 22,
                       ),
                     ),
@@ -557,13 +634,20 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
               ),
               if (hasOpenIssue)
                 FadeTransition(
-                  opacity: _blinkController.drive(CurveTween(curve: Curves.easeInOut)),
+                  opacity: _blinkController.drive(
+                    CurveTween(curve: Curves.easeInOut),
+                  ),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.criticalRed.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.35)),
+                      border: Border.all(
+                        color: AppColors.criticalRed.withValues(alpha: 0.35),
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -578,7 +662,9 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          openCount > 1 ? 'UNDER BREAKDOWN ($openCount)' : 'UNDER BREAKDOWN',
+                          openCount > 1
+                              ? 'UNDER BREAKDOWN ($openCount)'
+                              : 'UNDER BREAKDOWN',
                           style: const TextStyle(
                             color: AppColors.criticalRed,
                             fontSize: 10,
@@ -591,44 +677,49 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 )
               else if (isMarked)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: (!todayRecord.isSynced
-                            ? AppColors.infoBlue
-                            : todayRecord.isApproved
+                    color:
+                        (!todayRecord.isSynced
+                                ? AppColors.infoBlue
+                                : todayRecord.isApproved
                                 ? AppColors.successGreen
                                 : todayRecord.isRejected
-                                    ? AppColors.criticalRed
-                                    : AppColors.warningAmber)
-                        .withValues(alpha: 0.12),
+                                ? AppColors.criticalRed
+                                : AppColors.warningAmber)
+                            .withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: (!todayRecord.isSynced
-                              ? AppColors.infoBlue
-                              : todayRecord.isApproved
+                      color:
+                          (!todayRecord.isSynced
+                                  ? AppColors.infoBlue
+                                  : todayRecord.isApproved
                                   ? AppColors.successGreen
                                   : todayRecord.isRejected
-                                      ? AppColors.criticalRed
-                                      : AppColors.warningAmber)
-                          .withValues(alpha: 0.3),
+                                  ? AppColors.criticalRed
+                                  : AppColors.warningAmber)
+                              .withValues(alpha: 0.3),
                     ),
                   ),
                   child: Text(
                     !todayRecord.isSynced
                         ? '• OFFLINE (PENDING SYNC)'
                         : todayRecord.isApproved
-                            ? '• APPROVED'
-                            : todayRecord.isRejected
-                                ? '• REJECTED'
-                                : '• PENDING APPROVAL',
+                        ? '• APPROVED'
+                        : todayRecord.isRejected
+                        ? '• REJECTED'
+                        : '• PENDING APPROVAL',
                     style: TextStyle(
                       color: !todayRecord.isSynced
                           ? AppColors.infoBlue
                           : todayRecord.isApproved
-                              ? AppColors.successGreen
-                              : todayRecord.isRejected
-                                  ? AppColors.criticalRed
-                                  : AppColors.warningAmber,
+                          ? AppColors.successGreen
+                          : todayRecord.isRejected
+                          ? AppColors.criticalRed
+                          : AppColors.warningAmber,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
@@ -636,14 +727,21 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.successGreen.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
                     '• ASSIGNED',
-                    style: TextStyle(color: AppColors.successGreen, fontSize: 10, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: AppColors.successGreen,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
             ],
@@ -657,13 +755,16 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
               decoration: BoxDecoration(
                 color: AppColors.criticalRed.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.criticalRed.withValues(alpha: 0.2)),
+                border: Border.all(
+                  color: AppColors.criticalRed.withValues(alpha: 0.2),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${topIssue.isOem ? 'OEM' : 'Ops'} ${topIssue.ttNumber ?? ''}'.trim(),
+                    '${topIssue.isOem ? 'OEM' : 'Ops'} ${topIssue.ttNumber ?? ''}'
+                        .trim(),
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -672,8 +773,14 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    topIssue.reason.isNotEmpty ? topIssue.reason : 'Open issue — close before attendance',
-                    style: const TextStyle(fontSize: 12, color: AppColors.deepNavy, fontWeight: FontWeight.w600),
+                    topIssue.reason.isNotEmpty
+                        ? topIssue.reason
+                        : 'Open issue — close before attendance',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.deepNavy,
+                      fontWeight: FontWeight.w600,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -690,11 +797,21 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Model', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray)),
+                    const Text(
+                      'Model',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       machine.model,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.deepNavy,
+                      ),
                     ),
                   ],
                 ),
@@ -703,11 +820,21 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Site Location', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray)),
+                    const Text(
+                      'Site Location',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       machine.site,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.deepNavy,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -725,11 +852,17 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
               decoration: BoxDecoration(
                 color: AppColors.lightGreenBg,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.primaryGreen.withValues(alpha: 0.2)),
+                border: Border.all(
+                  color: AppColors.primaryGreen.withValues(alpha: 0.2),
+                ),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, size: 16, color: AppColors.primaryGreen),
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 16,
+                    color: AppColors.primaryGreen,
+                  ),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -750,11 +883,24 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () => _openIssueTypeGate(machine),
-                    icon: const Icon(Icons.report_problem_outlined, size: 16, color: AppColors.criticalRed),
-                    label: const Text('Report Breakdown', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.criticalRed)),
+                    icon: const Icon(
+                      Icons.report_problem_outlined,
+                      size: 16,
+                      color: AppColors.criticalRed,
+                    ),
+                    label: const Text(
+                      'Report Breakdown',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.criticalRed,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.criticalRed),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                   ),
                 ),
@@ -771,7 +917,10 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
                     );
                   },
                   icon: const Icon(Icons.visibility_outlined, size: 16),
-                  label: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  label: const Text(
+                    'View',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.deepNavy,
                   ),
@@ -785,17 +934,28 @@ class _AssignedMachinesScreenState extends State<AssignedMachinesScreen>
               child: ElevatedButton.icon(
                 onPressed: () => _onMarkAttendancePressed(machine),
                 icon: Icon(
-                  hasOpenIssue ? Icons.warning_amber_rounded : Icons.fingerprint_rounded,
+                  hasOpenIssue
+                      ? Icons.warning_amber_rounded
+                      : Icons.fingerprint_rounded,
                   size: 18,
                 ),
                 label: Text(
-                  hasOpenIssue ? 'Resolve issues & mark attendance' : 'Mark Machine Attendance',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  hasOpenIssue
+                      ? 'Resolve issues & mark attendance'
+                      : 'Mark Machine Attendance',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: hasOpenIssue ? AppColors.criticalRed : AppColors.primaryGreen,
+                  backgroundColor: hasOpenIssue
+                      ? AppColors.criticalRed
+                      : AppColors.primaryGreen,
                   foregroundColor: AppColors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
             ),

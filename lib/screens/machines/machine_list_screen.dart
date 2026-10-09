@@ -64,21 +64,6 @@ class _MachineListScreenState extends State<MachineListScreen> {
       var machines = await _repository.getAllMachines();
       if (!mounted) return;
 
-      final user = AuthStorageService().currentUser;
-      if (user != null && user.isVendorUser && user.vendors.isNotEmpty) {
-        final vendorNames = user.vendors
-            .map((v) => v['name']?.toString().toLowerCase())
-            .whereType<String>()
-            .toSet();
-
-        machines = machines.where((m) {
-          final mVendor = m.vendorName?.toLowerCase();
-          if (mVendor == null) return false;
-          return vendorNames.contains(mVendor) ||
-              vendorNames.any((v) => mVendor.contains(v));
-        }).toList();
-      }
-
       setState(() {
         _allFetchedMachines = machines;
         _isLoading = false;
@@ -95,12 +80,18 @@ class _MachineListScreenState extends State<MachineListScreen> {
 
   // Calculate dynamic filter counts
   int get _countAll => _allFetchedMachines.length;
-  int get _countCommissioned => _allFetchedMachines.where((m) => m.isCommissioned == true).length;
-  int get _countA600 => _allFetchedMachines.where((m) => m.model.toUpperCase().contains('A600')).length;
-  int get _countA800 => _allFetchedMachines.where((m) => m.model.toUpperCase().contains('A800')).length;
+  int get _countCommissioned =>
+      _allFetchedMachines.where((m) => m.isCommissioned == true).length;
+  int get _countA600 => _allFetchedMachines
+      .where((m) => m.model.toUpperCase().contains('A600'))
+      .length;
+  int get _countA800 => _allFetchedMachines
+      .where((m) => m.model.toUpperCase().contains('A800'))
+      .length;
   int get _countRunning => _allFetchedMachines.where((m) => m.isWorking).length;
   int get _countIdle => _allFetchedMachines.where((m) => m.isIdle).length;
-  int get _countMaintenance => _allFetchedMachines.where((m) => m.isMaintenance).length;
+  int get _countMaintenance =>
+      _allFetchedMachines.where((m) => m.isMaintenance).length;
 
   void _applyFilters() {
     setState(() {
@@ -108,12 +99,18 @@ class _MachineListScreenState extends State<MachineListScreen> {
         // 1. Search Filter
         if (_searchQuery.trim().isNotEmpty) {
           final q = _searchQuery.toLowerCase().trim();
-          final matchesChassis = machine.chassisNumber.toLowerCase().contains(q);
+          final matchesChassis = machine.chassisNumber.toLowerCase().contains(
+            q,
+          );
           final matchesName = machine.machineName.toLowerCase().contains(q);
           final matchesModel = machine.model.toLowerCase().contains(q);
           final matchesSite = machine.site.toLowerCase().contains(q);
-          final matchesOperator = machine.operatorName.toLowerCase().contains(q);
-          final matchesFuelCard = (machine.fuelCardText ?? '').toLowerCase().contains(q);
+          final matchesOperator = machine.operatorName.toLowerCase().contains(
+            q,
+          );
+          final matchesFuelCard = (machine.fuelCardText ?? '')
+              .toLowerCase()
+              .contains(q);
 
           if (!matchesChassis &&
               !matchesName &&
@@ -160,9 +157,14 @@ class _MachineListScreenState extends State<MachineListScreen> {
         _selectedFilter = 'All';
       });
       _applyFilters();
-    } else if (route == 'Machine Shifting' || route == 'Machine Transfers' || route == 'Transfers' || route == 'Shifting') {
+    } else if (route == 'Machine Shifting' ||
+        route == 'Machine Transfers' ||
+        route == 'Transfers' ||
+        route == 'Shifting') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.machineTransfers);
-    } else if (route == 'Live Tracking' || route == 'Live Status' || route == 'Map View') {
+    } else if (route == 'Live Tracking' ||
+        route == 'Live Status' ||
+        route == 'Map View') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.liveStatus);
     } else if (route == 'My Tasks' || route == 'Tasks') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.tasks);
@@ -178,13 +180,19 @@ class _MachineListScreenState extends State<MachineListScreen> {
       Navigator.of(context).pushReplacementNamed(AppRoutes.attendance);
     } else if (route == 'Expenses') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.expenses);
-    } else if (route == 'Refuel Records' || route == 'Refuel' || route == 'Fuel Logs') {
+    } else if (route == 'Refuel Records' ||
+        route == 'Refuel' ||
+        route == 'Fuel Logs') {
       Navigator.of(context).pushNamed(AppRoutes.refuel);
-    } else if (route == 'Stock & Spares' || route == 'Stock' || route == 'Inventory') {
+    } else if (route == 'Stock & Spares' ||
+        route == 'Stock' ||
+        route == 'Inventory') {
       Navigator.of(context).pushReplacementNamed(AppRoutes.inventory);
     } else if (route == 'Breakdown' || route == 'Breakdowns') {
       Navigator.of(context).pushNamed(AppRoutes.breakdowns);
-    } else if (route == 'Alert Center' || route == 'Alerts' || route == 'Alert') {
+    } else if (route == 'Alert Center' ||
+        route == 'Alerts' ||
+        route == 'Alert') {
       Navigator.of(context).pushNamed(AppRoutes.alerts);
     } else if (route == 'Notifications') {
       Navigator.of(context).pushNamed(AppRoutes.notifications);
@@ -216,7 +224,9 @@ class _MachineListScreenState extends State<MachineListScreen> {
     final isMobile = mediaWidth < 640;
 
     final user = AuthStorageService().currentUser;
-    final userName = user?.displayName.isNotEmpty == true ? user!.displayName : (user?.username.isNotEmpty == true ? user!.username : 'User');
+    final userName = user?.displayName.isNotEmpty == true
+        ? user!.displayName
+        : (user?.username.isNotEmpty == true ? user!.username : 'User');
     final userRole = user?.role.isNotEmpty == true ? user!.role : 'ADMIN';
     final userInitials = user?.initials ?? 'U';
 
@@ -323,14 +333,14 @@ class _MachineListScreenState extends State<MachineListScreen> {
                 spacing: 6,
                 runSpacing: 4,
                 children: [
-                  const Text(
-                    'Machines',
-                    style: AppTextStyles.displayMedium,
-                  ),
+                  const Text('Machines', style: AppTextStyles.displayMedium),
 
                   // FiberForce API Badge with Live Broadcast Pulse Dot
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.headerGreen,
                       borderRadius: BorderRadius.circular(12),
@@ -372,7 +382,11 @@ class _MachineListScreenState extends State<MachineListScreen> {
         // Sync API Button
         OutlinedButton.icon(
           onPressed: _fetchMachines,
-          icon: const Icon(Icons.sync_rounded, size: 15, color: AppColors.deepNavy),
+          icon: const Icon(
+            Icons.sync_rounded,
+            size: 15,
+            color: AppColors.deepNavy,
+          ),
           label: Text(
             isMobile ? 'Sync' : 'Sync API',
             style: const TextStyle(
@@ -474,12 +488,17 @@ class _MachineListScreenState extends State<MachineListScreen> {
               borderRadius: BorderRadius.circular(20),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? AppColors.deepNavy : AppColors.white,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isSelected ? AppColors.deepNavy : AppColors.borderGray,
+                    color: isSelected
+                        ? AppColors.deepNavy
+                        : AppColors.borderGray,
                     width: 1,
                   ),
                 ),
@@ -521,7 +540,7 @@ class _MachineListScreenState extends State<MachineListScreen> {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 14,
             mainAxisSpacing: 14,
-            mainAxisExtent: 245,
+            mainAxisExtent: width < 650 ? 225 : 245,
           ),
           itemCount: _filteredMachines.length,
           itemBuilder: (context, index) {
@@ -545,8 +564,8 @@ class _MachineListScreenState extends State<MachineListScreen> {
         int crossAxisCount = width >= 1100
             ? 3
             : width >= 650
-                ? 2
-                : 1;
+            ? 2
+            : 1;
 
         return GridView.builder(
           shrinkWrap: true,
