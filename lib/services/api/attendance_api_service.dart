@@ -14,7 +14,7 @@ class AttendanceApiService {
   final ApiClient apiClient;
 
   AttendanceApiService({ApiClient? apiClient})
-      : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.defaultBaseUrl);
+    : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.defaultBaseUrl);
 
   /// Cleanly extract user ID string without modifying alphanumeric characters or ObjectIds
   String _getCleanUserId(UserModel? user) {
@@ -51,7 +51,9 @@ class AttendanceApiService {
       }
     } catch (e) {
       if (kDebugMode) {
-        print('[AttendanceApiService] Primary getTodaysMuster failed ($e), trying fallback...');
+        print(
+          '[AttendanceApiService] Primary getTodaysMuster failed ($e), trying fallback...',
+        );
       }
       try {
         final response = await apiClient.get(fallbackEndpoint);
@@ -68,7 +70,10 @@ class AttendanceApiService {
   }
 
   /// B. CREATE MUSTER: POST /api/tasks/{taskId}/musters
-  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body) async {
+  Future<DailyMuster> createMuster(
+    String taskId,
+    Map<String, dynamic> body,
+  ) async {
     final cleanTaskId = taskId.trim();
     final primaryEndpoint = '/api/tasks/$cleanTaskId/musters';
     final fallbackEndpoint = '/api/v1/tasks/$cleanTaskId/musters';
@@ -78,7 +83,9 @@ class AttendanceApiService {
       response = await apiClient.post(primaryEndpoint, body: body);
     } catch (e) {
       if (kDebugMode) {
-        print('[AttendanceApiService] Primary createMuster failed ($e), trying fallback...');
+        print(
+          '[AttendanceApiService] Primary createMuster failed ($e), trying fallback...',
+        );
       }
       response = await apiClient.post(fallbackEndpoint, body: body);
     }
@@ -107,7 +114,10 @@ class AttendanceApiService {
   }
 
   /// D. UPDATE/SAVE MUSTER: PUT /api/musters/{musterId}
-  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body) async {
+  Future<DailyMuster> updateMuster(
+    String musterId,
+    Map<String, dynamic> body,
+  ) async {
     final cleanMusterId = musterId.trim();
     final primaryEndpoint = '/api/musters/$cleanMusterId';
     final fallbackEndpoint = '/api/v1/musters/$cleanMusterId';
@@ -117,7 +127,9 @@ class AttendanceApiService {
       response = await apiClient.put(primaryEndpoint, body: body);
     } catch (e) {
       if (kDebugMode) {
-        print('[AttendanceApiService] Primary updateMuster failed ($e), trying fallback...');
+        print(
+          '[AttendanceApiService] Primary updateMuster failed ($e), trying fallback...',
+        );
       }
       response = await apiClient.put(fallbackEndpoint, body: body);
     }
@@ -133,22 +145,24 @@ class AttendanceApiService {
     final effectiveToken = (stepUpToken != null && stepUpToken.isNotEmpty)
         ? stepUpToken
         : (apiClient.authToken != null && apiClient.authToken!.isNotEmpty
-            ? apiClient.authToken!
-            : 'stepup_default');
+              ? apiClient.authToken!
+              : 'stepup_default');
 
-    final primaryEndpoint = '/api/musters/$cleanMusterId/submit?stepUpToken=${Uri.encodeComponent(effectiveToken)}';
-    final fallbackEndpoint = '/api/v1/musters/$cleanMusterId/submit?stepUpToken=${Uri.encodeComponent(effectiveToken)}';
+    final primaryEndpoint =
+        '/api/musters/$cleanMusterId/submit?stepUpToken=${Uri.encodeComponent(effectiveToken)}';
+    final fallbackEndpoint =
+        '/api/v1/musters/$cleanMusterId/submit?stepUpToken=${Uri.encodeComponent(effectiveToken)}';
 
-    final body = <String, dynamic>{
-      'stepUpToken': effectiveToken,
-    };
+    final body = <String, dynamic>{'stepUpToken': effectiveToken};
 
     try {
       await apiClient.post(primaryEndpoint, body: body);
       return true;
     } catch (e) {
       if (kDebugMode) {
-        print('[AttendanceApiService] Primary submitMuster failed ($e), trying fallback...');
+        print(
+          '[AttendanceApiService] Primary submitMuster failed ($e), trying fallback...',
+        );
       }
       try {
         await apiClient.post(fallbackEndpoint, body: body);
@@ -184,7 +198,10 @@ class AttendanceApiService {
   }
 
   /// G. APPROVE MUSTER: POST /api/musters/{musterId}/approve
-  Future<bool> approveMuster(String musterId, {String remarks = 'Attendance approved'}) async {
+  Future<bool> approveMuster(
+    String musterId, {
+    String remarks = 'Attendance approved',
+  }) async {
     final cleanMusterId = musterId.trim();
     final primaryEndpoint = '/api/musters/$cleanMusterId/approve';
     final fallbackEndpoint = '/api/v1/musters/$cleanMusterId/approve';
@@ -303,7 +320,8 @@ class AttendanceApiService {
     required String entryId,
     String contentType = 'image/jpeg',
   }) async {
-    final queryParams = 'musterId=${Uri.encodeComponent(musterId)}&entryId=${Uri.encodeComponent(entryId)}&contentType=${Uri.encodeComponent(contentType)}';
+    final queryParams =
+        'musterId=${Uri.encodeComponent(musterId)}&entryId=${Uri.encodeComponent(entryId)}&contentType=${Uri.encodeComponent(contentType)}';
     final primaryEndpoint = '/api/musters/photo-upload-url?$queryParams';
     final fallbackEndpoint = '/api/v1/musters/photo-upload-url?$queryParams';
 
@@ -346,7 +364,8 @@ class AttendanceApiService {
   }) async {
     if (photoKey.isEmpty) return '';
 
-    final queryParams = 'musterId=${Uri.encodeComponent(musterId)}&photoKey=${Uri.encodeComponent(photoKey)}';
+    final queryParams =
+        'musterId=${Uri.encodeComponent(musterId)}&photoKey=${Uri.encodeComponent(photoKey)}';
     final primaryEndpoint = '/api/musters/photo-url?$queryParams';
     final fallbackEndpoint = '/api/v1/musters/photo-url?$queryParams';
 
@@ -379,7 +398,9 @@ class AttendanceApiService {
     String prefix = 'check_in',
     bool isCheckOut = false,
   }) async {
-    final existingPhoto = isCheckOut ? model.checkOutPhotoUrl : model.checkInPhotoUrl;
+    final existingPhoto = isCheckOut
+        ? model.checkOutPhotoUrl
+        : model.checkInPhotoUrl;
     if (existingPhoto != null && existingPhoto.trim().isNotEmpty) {
       return model;
     }
@@ -465,7 +486,9 @@ class AttendanceApiService {
     if (response is Map<String, dynamic>) {
       final data = response['data'];
       if (data is Map<String, dynamic>) {
-        if (data.containsKey('id') || data.containsKey('attendance_id') || data.containsKey('check_in_time')) {
+        if (data.containsKey('id') ||
+            data.containsKey('attendance_id') ||
+            data.containsKey('check_in_time')) {
           itemMap = data;
         }
       } else if (data is List && data.isNotEmpty) {
@@ -477,7 +500,9 @@ class AttendanceApiService {
         if (results.isNotEmpty && results.first is Map<String, dynamic>) {
           itemMap = results.first as Map<String, dynamic>;
         }
-      } else if (response.containsKey('id') || response.containsKey('attendance_id') || response.containsKey('check_in_time')) {
+      } else if (response.containsKey('id') ||
+          response.containsKey('attendance_id') ||
+          response.containsKey('check_in_time')) {
         itemMap = response;
       }
     } else if (response is List && response.isNotEmpty) {
@@ -494,11 +519,12 @@ class AttendanceApiService {
 
   /// Fetch machines assigned to the currently authenticated user
   Future<List<Machine>> fetchMyAssignedMachines({String? date}) async {
-    final todayStr = date ?? '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
     final endpoints = [
       '/api/v1/attendance/my-assigned-machines/',
-      '/api/v1/attendance/team-attendance/?date=$todayStr',
       '/api/v1/machines/assigned/',
+      // The authenticated machine list is vendor/assignment scoped by HERO and
+      // supplies the machine when the dedicated attendance assignment route
+      // returns an empty result for vendor accounts.
       '/api/v1/machines/',
       '/api/musters/machines',
     ];
@@ -509,7 +535,9 @@ class AttendanceApiService {
         final machines = _parseMachineList(response);
         if (machines.isNotEmpty) {
           if (kDebugMode) {
-            print('[AttendanceApiService] Fetched ${machines.length} assigned machines from $ep');
+            print(
+              '[AttendanceApiService] Fetched ${machines.length} assigned machines from $ep',
+            );
           }
           return machines;
         }
@@ -518,17 +546,58 @@ class AttendanceApiService {
     return [];
   }
 
+  /// Fetch the equipment rows linked to the web attendance roster.
+  /// This is intentionally separate from `my-assigned-machines`: HERO can
+  /// return a broader set there than the machines shown on team attendance.
+  Future<List<Machine>> fetchTeamAttendanceMachines({String? date}) async {
+    final todayStr =
+        date ??
+        '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
+    final response = await apiClient.get(
+      '/api/v1/attendance/team-attendance/?date=$todayStr',
+    );
+    if (response is! Map) return const <Machine>[];
+    final data = response['data'];
+    if (data is! Map || data['assigned_machines'] is! List) {
+      return const <Machine>[];
+    }
+
+    return (data['assigned_machines'] as List).whereType<Map>().map((row) {
+      final json = Map<String, dynamic>.from(row);
+      final chassis = json['chassis_no'] ?? json['machine_no'] ?? json['name'];
+      json['machine_chassis_no'] ??= chassis;
+      // The attendance endpoint identifies a machine with a UUID, while
+      // /machines/ uses an integer primary key. Keep the attendance ID so
+      // check-in requests address the same row as the web portal.
+      json['id'] ??= json['machine_id'] ?? chassis;
+      json['model_code'] ??= json['code'];
+      if (json['name']?.toString() == chassis?.toString()) {
+        json.remove('name');
+      }
+      return Machine.fromJson(json);
+    }).toList();
+  }
+
   /// Fetch authorized team members for supervisor
   Future<List<UserModel>> fetchAuthorizedTeamMembers({String? date}) async {
-    final todayStr = date ?? '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
-    final primaryEndpoint = '/api/v1/attendance/team-attendance/?date=$todayStr';
+    final todayStr =
+        date ??
+        '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}';
+    final primaryEndpoint =
+        '/api/v1/attendance/team-attendance/?date=$todayStr';
     const secondaryEndpoint = '/api/v1/attendance/team-members/';
     const tertiaryEndpoint = '/api/v1/users/my-team/';
 
     try {
       final response = await apiClient.get(primaryEndpoint);
-      final users = _parseUserList(response);
-      if (users.isNotEmpty) return users;
+      // An empty date-scoped roster is a valid result. Preserve it rather than
+      // silently replacing it with the broader, non-date-scoped team list.
+      if (response is Map &&
+          ((response['data'] is Map &&
+                  (response['data'] as Map).containsKey('team_members')) ||
+              response.containsKey('team_members'))) {
+        return _parseUserList(response);
+      }
     } catch (_) {}
 
     try {
@@ -567,7 +636,9 @@ class AttendanceApiService {
     final photoBase64 = _toBase64Photo(photoBytes);
 
     final mChassis = machineChassisNo.isNotEmpty ? machineChassisNo : 'N/A';
-    final mId = (assignmentId != null && assignmentId.isNotEmpty) ? assignmentId : mChassis;
+    final mId = (assignmentId != null && assignmentId.isNotEmpty)
+        ? assignmentId
+        : mChassis;
     dynamic parsedUserId = int.tryParse(userIdStr) ?? userIdStr;
 
     final jsonBody = <String, dynamic>{
@@ -597,10 +668,17 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'machine_check_in');
+      return await _ensurePhotoUrl(
+        parsed,
+        photoBytes,
+        photoBase64,
+        prefix: 'machine_check_in',
+      );
     }
 
-    throw Exception('Invalid response received from machine check-in endpoint.');
+    throw Exception(
+      'Invalid response received from machine check-in endpoint.',
+    );
   }
 
   /// Submit Team Attendance transaction
@@ -617,7 +695,9 @@ class AttendanceApiService {
 
     final user = AuthStorageService().currentUser;
     final currentUserIdStr = _getCleanUserId(user);
-    final targetUserIdStr = targetUserId.trim().isNotEmpty ? targetUserId.trim() : currentUserIdStr;
+    final targetUserIdStr = targetUserId.trim().isNotEmpty
+        ? targetUserId.trim()
+        : currentUserIdStr;
 
     if (targetUserIdStr == currentUserIdStr) {
       return checkIn(
@@ -633,7 +713,8 @@ class AttendanceApiService {
     final photoBase64 = _toBase64Photo(photoBytes);
 
     dynamic parsedTargetId = int.tryParse(targetUserIdStr) ?? targetUserIdStr;
-    dynamic parsedCurrentId = int.tryParse(currentUserIdStr) ?? currentUserIdStr;
+    dynamic parsedCurrentId =
+        int.tryParse(currentUserIdStr) ?? currentUserIdStr;
 
     final jsonBody = <String, dynamic>{
       'user_id': parsedTargetId,
@@ -663,7 +744,12 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'team_check_in');
+      return await _ensurePhotoUrl(
+        parsed,
+        photoBytes,
+        photoBase64,
+        prefix: 'team_check_in',
+      );
     }
 
     throw Exception('Failed to record team attendance on portal endpoint.');
@@ -711,7 +797,12 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'check_in');
+      return await _ensurePhotoUrl(
+        parsed,
+        photoBytes,
+        photoBase64,
+        prefix: 'check_in',
+      );
     }
 
     throw Exception('Failed to record check-in on portal endpoint.');
@@ -763,7 +854,13 @@ class AttendanceApiService {
     }
 
     if (parsed != null) {
-      return await _ensurePhotoUrl(parsed, photoBytes, photoBase64, prefix: 'check_out', isCheckOut: true);
+      return await _ensurePhotoUrl(
+        parsed,
+        photoBytes,
+        photoBase64,
+        prefix: 'check_out',
+        isCheckOut: true,
+      );
     }
 
     throw Exception('Failed to record check-out on portal endpoint.');
@@ -775,7 +872,8 @@ class AttendanceApiService {
     int size = 50,
     String? statusFilter,
   }) async {
-    final queryParams = 'page=$page&size=$size${statusFilter != null && statusFilter.isNotEmpty ? "&status=$statusFilter" : ""}';
+    final queryParams =
+        'page=$page&size=$size${statusFilter != null && statusFilter.isNotEmpty ? "&status=$statusFilter" : ""}';
     final primaryEndpoint = '/api/v1/attendance/history/?$queryParams';
     final secondaryEndpoint = '/api/v1/attendance/?$queryParams';
 
@@ -804,7 +902,8 @@ class AttendanceApiService {
     int size = 20,
   }) async {
     final queryParams = 'page=$page&size=$size';
-    final primaryEndpoint = '/api/v1/attendance/pending-approvals/?$queryParams';
+    final primaryEndpoint =
+        '/api/v1/attendance/pending-approvals/?$queryParams';
 
     try {
       final response = await apiClient.get(primaryEndpoint);
@@ -821,7 +920,8 @@ class AttendanceApiService {
   DailyMuster? _parseDailyMuster(dynamic response) {
     if (response == null) return null;
     if (response is Map<String, dynamic>) {
-      if (response.containsKey('data') && response['data'] is Map<String, dynamic>) {
+      if (response.containsKey('data') &&
+          response['data'] is Map<String, dynamic>) {
         return DailyMuster.fromJson(response['data'] as Map<String, dynamic>);
       }
       return DailyMuster.fromJson(response);
@@ -832,7 +932,12 @@ class AttendanceApiService {
   List<DailyMuster> _parseDailyMusterList(dynamic response) {
     List<dynamic> list = [];
     if (response is Map<String, dynamic>) {
-      dynamic data = response['data'] ?? response['results'] ?? response['content'] ?? response['items'] ?? response;
+      dynamic data =
+          response['data'] ??
+          response['results'] ??
+          response['content'] ??
+          response['items'] ??
+          response;
       if (data is List) {
         list = data;
       } else if (response['musters'] is List) {
@@ -894,56 +999,71 @@ class AttendanceApiService {
   }
 
   List<Machine> _parseMachineList(dynamic response) {
-    List<dynamic> list = [];
-    if (response is Map<String, dynamic>) {
-      dynamic data = response['data'] ?? response;
-      if (data is Map<String, dynamic>) {
-        if (data['assigned_machines'] is List) {
-          list = data['assigned_machines'] as List<dynamic>;
-        } else if (data['machines'] is List) {
-          list = data['machines'] as List<dynamic>;
-        } else if (data['results'] is List) {
-          list = data['results'] as List<dynamic>;
-        } else if (data['content'] is List) {
-          list = data['content'] as List<dynamic>;
-        }
-      } else if (data is List) {
-        list = data;
-      } else if (response['assigned_machines'] is List) {
-        list = response['assigned_machines'] as List<dynamic>;
-      } else if (response['machines'] is List) {
-        list = response['machines'] as List<dynamic>;
-      } else if (response['results'] is List) {
-        list = response['results'] as List<dynamic>;
+    const keys = [
+      'assigned_machines',
+      'machines',
+      'results',
+      'items',
+      'records',
+      'content',
+      'data',
+    ];
+    List<dynamic> findList(dynamic value, int depth) {
+      if (value is List) return value;
+      if (value is! Map || depth > 4) return const [];
+      for (final key in keys) {
+        if (value[key] is List) return value[key] as List<dynamic>;
       }
-    } else if (response is List) {
-      list = response;
+      for (final key in keys) {
+        final nested = value[key];
+        if (nested is Map) {
+          final found = findList(nested, depth + 1);
+          if (found.isNotEmpty) return found;
+        }
+      }
+      return const [];
     }
-    return list.whereType<Map<String, dynamic>>().map((j) => Machine.fromJson(j)).toList();
+
+    final list = findList(response, 0);
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map((j) => Machine.fromJson(j))
+        .toList();
   }
 
   List<UserModel> _parseUserList(dynamic response) {
-    List<dynamic> list = [];
-    if (response is Map<String, dynamic>) {
-      dynamic data = response['data'] ?? response;
-      if (data is Map<String, dynamic>) {
-        if (data['team_members'] is List) {
-          list = data['team_members'] as List<dynamic>;
-        } else if (data['results'] is List) {
-          list = data['results'] as List<dynamic>;
-        } else if (data['content'] is List) {
-          list = data['content'] as List<dynamic>;
-        }
-      } else if (data is List) {
-        list = data;
-      } else if (response['team_members'] is List) {
-        list = response['team_members'] as List<dynamic>;
-      } else if (response['results'] is List) {
-        list = response['results'] as List<dynamic>;
+    const keys = [
+      'team_members',
+      'members',
+      'users',
+      'results',
+      'items',
+      'records',
+      'content',
+      'data',
+    ];
+    List<dynamic> findList(dynamic value, int depth) {
+      if (value is List) return value;
+      if (value is! Map || depth > 4) return const [];
+      for (final key in keys) {
+        if (value[key] is List) return value[key] as List<dynamic>;
       }
-    } else if (response is List) {
-      list = response;
+      for (final key in keys) {
+        final nested = value[key];
+        if (nested is Map) {
+          final found = findList(nested, depth + 1);
+          if (found.isNotEmpty) return found;
+        }
+      }
+      return const [];
     }
-    return list.whereType<Map<String, dynamic>>().map((j) => UserModel.fromJson(j)).toList();
+
+    final list = findList(response, 0);
+    return list.whereType<Map<String, dynamic>>().map((json) {
+      final user = json['user'] ?? json['member'] ?? json['team_member'];
+      return UserModel.fromJson(
+        user is Map ? Map<String, dynamic>.from(user) : json,
+      );
+    }).toList();
   }
 }

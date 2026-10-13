@@ -28,7 +28,7 @@ class _TeamAttendanceScreenState extends State<TeamAttendanceScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await Future.wait([
-        widget.controller.fetchAssignedMachines(),
+        widget.controller.fetchTeamAttendanceMachines(),
         widget.controller.fetchAuthorizedTeamMembers(),
         widget.controller.fetchHistory(),
       ]);

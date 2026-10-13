@@ -56,7 +56,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       if (!mounted) return;
       _controller.fetchTodayAttendance();
       _controller.fetchHistory();
-      await _controller.fetchAssignedMachines();
+      await _controller.fetchTeamAttendanceMachines();
       await _controller.fetchAuthorizedTeamMembers();
       await _loadOpenIssues();
     });
@@ -72,7 +72,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   Future<void> _refreshAll() async {
     _controller.fetchTodayAttendance();
     _controller.fetchHistory();
-    await _controller.fetchAssignedMachines();
+    await _controller.fetchTeamAttendanceMachines();
     await _controller.fetchAuthorizedTeamMembers();
     await _loadOpenIssues();
   }

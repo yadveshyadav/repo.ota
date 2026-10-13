@@ -1,9 +1,12 @@
 package com.infocrats.hero_app
 
 import android.content.Intent
+import android.content.ContentValues
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -12,6 +15,7 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.infocrats.hero/ota_installer"
+    private val EVIDENCE_CHANNEL = "com.infocrats.hero/evidence_export"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -85,6 +89,90 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, EVIDENCE_CHANNEL).setMethodCallHandler { call, result ->
+            try {
+                when (call.method) {
+                    "exportBytes" -> {
+                        val bytes = call.argument<ByteArray>("bytes")
+                            ?: throw IllegalArgumentException("File bytes are missing")
+                        val uri = exportToDownloads(
+                            bytes = bytes,
+                            sourcePath = null,
+                            relativePath = call.argument<String>("relativePath"),
+                            fileName = call.argument<String>("fileName"),
+                            mimeType = call.argument<String>("mimeType"),
+                        )
+                        result.success(mapOf("uri" to uri.toString()))
+                    }
+                    "exportFile" -> {
+                        val sourcePath = call.argument<String>("sourcePath")
+                            ?: throw IllegalArgumentException("Source file path is missing")
+                        val uri = exportToDownloads(
+                            bytes = null,
+                            sourcePath = sourcePath,
+                            relativePath = call.argument<String>("relativePath"),
+                            fileName = call.argument<String>("fileName"),
+                            mimeType = call.argument<String>("mimeType"),
+                        )
+                        result.success(mapOf("uri" to uri.toString()))
+                    }
+                    "deleteExport" -> {
+                        val uri = call.argument<String>("uri")
+                        result.success(uri != null && contentResolver.delete(Uri.parse(uri), null, null) > 0)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (error: Exception) {
+                result.error("EVIDENCE_EXPORT_FAILED", error.localizedMessage ?: "Could not export evidence", null)
+            }
+        }
+    }
+
+    private fun exportToDownloads(
+        bytes: ByteArray?,
+        sourcePath: String?,
+        relativePath: String?,
+        fileName: String?,
+        mimeType: String?,
+    ): Uri {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            throw IllegalStateException("Public evidence folders require Android 10 or newer")
+        }
+        val safeRelativePath = relativePath
+            ?.split("/")
+            ?.filter { it.isNotBlank() && it != "." && it != ".." }
+            ?.joinToString("/")
+            ?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("Report folder path is missing")
+        val safeName = fileName
+            ?.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            ?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("File name is missing")
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType ?: "application/octet-stream")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$safeRelativePath")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IllegalStateException("Android could not create the public evidence file")
+        try {
+            contentResolver.openOutputStream(uri, "w")?.use { output ->
+                if (sourcePath != null) {
+                    File(sourcePath).inputStream().use { input -> input.copyTo(output) }
+                } else {
+                    output.write(bytes ?: ByteArray(0))
+                }
+                output.flush()
+            } ?: throw IllegalStateException("Android could not open the public evidence file")
+            val published = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            contentResolver.update(uri, published, null, null)
+            return uri
+        } catch (error: Exception) {
+            contentResolver.delete(uri, null, null)
+            throw error
         }
     }
 }

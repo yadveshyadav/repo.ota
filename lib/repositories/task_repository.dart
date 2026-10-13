@@ -32,7 +32,7 @@ class ApiTaskRepository implements TaskRepository {
       : apiService = apiService ??
             TaskApiService(
               apiClient: apiClient ??
-                  ApiClient(baseUrl: AppConstants.uatApiBaseUrl),
+                  ApiClient(baseUrl: AppConstants.ilyncApiBaseUrl),
             );
 
   @override

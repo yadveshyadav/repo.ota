@@ -7,17 +7,21 @@ import 'package:hero_app/features/hindrance/data/hindrance_local_store.dart';
 import 'package:hero_app/models/task_model.dart';
 import 'package:hero_app/services/api/api_client.dart';
 
-/// Creates and submits Hindrance and CCN tasks through the Dev task-service.
+/// Creates and submits Hindrance and CCN tasks through the IlYnc UAT task service.
 /// Plan metadata is read from the selected task; missing required values are
 /// reported instead of guessed.
 class HindranceSubmissionService {
   static const _defaultProjectPhase = 'PHASE_1';
 
   HindranceSubmissionService({ApiClient? api})
-    : _api = api ?? ApiClient(baseUrl: AppConstants.devApiBaseUrl);
+    : _api = api ?? ApiClient(baseUrl: AppConstants.ilyncApiBaseUrl);
 
   final ApiClient _api;
   final _store = HindranceLocalStore.instance;
+  String? get _taskToken => AppConstants.ilyncIsDev
+      ? AuthStorageService().devTaskAccessToken
+      : AuthStorageService().uatTaskAccessToken;
+  String get _environmentLabel => AppConstants.ilyncEnvironment.toUpperCase();
 
   Future<String> createTask({
     required TaskModel block,
@@ -26,9 +30,9 @@ class HindranceSubmissionService {
     String taskType = 'HINDRANCE',
     String? taskName,
   }) async {
-    final token = AuthStorageService().devTaskAccessToken;
+    final token = _taskToken;
     if (token == null || token.isEmpty) {
-      throw StateError('Sign in again to establish Dev task-service access.');
+      throw StateError('Sign in again to establish $_environmentLabel task-service access.');
     }
     _api.setAuthToken(token);
     final rawPlanId =
@@ -50,7 +54,9 @@ class HindranceSubmissionService {
     final rawProjectPhase =
         block.locationSnapshot?.projectPhase ??
         _findMetaValue(block.meta, const {'projectPhase', 'project_phase'});
-    final projectPhase = rawProjectPhase?.trim().isNotEmpty == true
+    final projectPhase = taskType.trim().toUpperCase() == 'OTN'
+        ? 'PHASE_2'
+        : rawProjectPhase?.trim().isNotEmpty == true
         ? rawProjectPhase!.trim()
         : _defaultProjectPhase;
     // Task IDs identify execution rows. BoQ is keyed by its master Block ID,
@@ -144,15 +150,15 @@ class HindranceSubmissionService {
       });
     }
     final normalizedType = taskType.trim().toUpperCase();
-    if (normalizedType != 'HINDRANCE' && normalizedType != 'CCN') {
+    if (normalizedType != 'HINDRANCE' && normalizedType != 'CCN' && normalizedType != 'OTN') {
       throw ArgumentError.value(
         taskType,
         'taskType',
-        'Must be HINDRANCE or CCN.',
+        'Must be HINDRANCE, CCN, or OTN.',
       );
     }
     final response = await _api.post(
-      '${AppConstants.devApiBaseUrl}/api/tasks',
+      '${AppConstants.ilyncApiBaseUrl}/api/tasks',
       body: {
         'taskType': normalizedType,
         'structure': 'MERGED',
@@ -185,10 +191,11 @@ class HindranceSubmissionService {
     required Map<String, dynamic> report,
     String? existingTaskId,
     Future<void> Function(String taskId)? onTaskCreated,
+    Future<void> Function(int bytesSent)? onUploadBytes,
   }) async {
-    final token = AuthStorageService().devTaskAccessToken;
+    final token = _taskToken;
     if (token == null || token.isEmpty) {
-      throw StateError('Sign in again to establish Dev task-service access.');
+      throw StateError('Sign in again to establish $_environmentLabel task-service access.');
     }
     _api.setAuthToken(token);
     var taskId = existingTaskId;
@@ -209,6 +216,7 @@ class HindranceSubmissionService {
       taskId,
       report['media'] as List? ?? const [],
       fieldPrefix: 'ccn',
+      onUploadBytes: onUploadBytes,
     );
     final selectedCodes = segments
         .map((segment) => segment.segmentCode)
@@ -234,13 +242,176 @@ class HindranceSubmissionService {
       },
       'attachmentKeys': const <String>[],
     };
-    await _api.post('${AppConstants.devApiBaseUrl}/api/tasks/save', body: body);
+    await _api.post(
+      '${AppConstants.ilyncApiBaseUrl}/api/tasks/save',
+      body: body,
+    );
     final submitted = await _api.post(
-      '${AppConstants.devApiBaseUrl}/api/tasks/submit',
+      '${AppConstants.ilyncApiBaseUrl}/api/tasks/submit',
       body: body,
     );
     _validateSubmitStatus(submitted);
     return taskId;
+  }
+
+  /// Uploads OTN evidence with the OTN contract's single photo-upload URL
+  /// endpoint, then persists and submits the same OtnTaskData payload.
+  Future<String> submitOtn({
+    required TaskModel block,
+    required TaskModel ring,
+    required List<TaskSegmentModel> segments,
+    required Map<String, dynamic> report,
+    String? existingTaskId,
+    Future<void> Function(String taskId)? onTaskCreated,
+    Future<void> Function()? onBeforeSave,
+    Future<void> Function()? onBeforeSubmit,
+    Future<void> Function()? onUploadProgress,
+    Future<void> Function(int bytesSent)? onUploadBytes,
+  }) async {
+    final token = _taskToken;
+    if (token == null || token.isEmpty) {
+      throw StateError('Sign in again to establish $_environmentLabel task-service access.');
+    }
+    _api.setAuthToken(token);
+    var taskId = existingTaskId;
+    if (taskId == null || taskId.isEmpty) {
+      taskId = await createTask(
+        block: block,
+        ring: ring,
+        segments: segments,
+        taskType: 'OTN',
+        taskName: 'OTN at ${ring.displayName}',
+      );
+      await onTaskCreated?.call(taskId);
+    }
+
+    final media = (report['media'] as List? ?? const [])
+        .whereType<Map>()
+        .map(Map<String, dynamic>.from)
+        .toList();
+    final shpFiles = (report['shpFiles'] as List? ?? const [])
+        .whereType<Map>()
+        .map(Map<String, dynamic>.from)
+        .toList();
+    final evidence = <String, dynamic>{
+      'photos': <Map<String, dynamic>>[],
+      'routeVideos': <Map<String, dynamic>>[],
+      'endVideos': <Map<String, dynamic>>[],
+      'kmlFiles': <String>[],
+    };
+    var index = 0;
+    Future<Map<String, dynamic>> upload(Map<String, dynamic> item) async {
+      final slot = item['slot']?.toString() ?? '';
+      final key = item['uploadKey']?.toString();
+      final photoKey = key?.isNotEmpty == true
+          ? key!
+          : await _uploadFile(
+              taskId: taskId!,
+              field: switch (slot) {
+                'start_point' => 'START_PHOTO',
+                'end_point' => 'END_PHOTO',
+                'walkthrough' => 'ROUTE_WALK_VIDEO',
+                'additional_photo' => 'ADDITIONAL_PHOTO_${++index}',
+                'additional_video' => 'ADDITIONAL_ROUTE_VIDEO_${++index}',
+                _ => 'OTN_EVIDENCE_${++index}',
+              },
+              contentType: _contentType(item),
+              bytes: await _requiredBytes(item, 'OTN evidence'),
+              onBytesSent: onUploadBytes,
+              endpoint: '/api/survey/photo-upload-url',
+              keyName: 'photoKey',
+            );
+      item
+        ..['uploadKey'] = photoKey
+        ..['syncState'] = 'UPLOADED';
+      await onUploadProgress?.call();
+      return _mediaPayload(item, photoKey, _displayLabel(slot));
+    }
+
+    // Contract requires photos to complete before video uploads.
+    for (final item in media.where((item) => item['kind'] == 'photo')) {
+      final photo = await upload(item);
+      (evidence['photos'] as List<Map<String, dynamic>>).add(photo);
+    }
+    final start = _mediaForSlot(media, 'start_point');
+    final end = _mediaForSlot(media, 'end_point');
+    for (final item in media.where((item) => item['kind'] == 'video')) {
+      final video = await upload(item);
+      if (item['slot'] == 'walkthrough') {
+        evidence['walkthroughVideo'] = video;
+        (evidence['routeVideos'] as List<Map<String, dynamic>>).add(video);
+      } else if (item['slot'] == 'additional_video') {
+        (evidence['routeVideos'] as List<Map<String, dynamic>>).add(video);
+      } else {
+        (evidence['endVideos'] as List<Map<String, dynamic>>).add(video);
+      }
+    }
+    for (final file in shpFiles) {
+      final mime = 'application/vnd.google-earth.kml+xml';
+      final key = file['uploadKey']?.toString().isNotEmpty == true
+          ? file['uploadKey'].toString()
+          : await _uploadFile(
+              taskId: taskId,
+              field: 'KML_${++index}',
+              contentType: mime,
+              bytes: await _requiredBytes(file, 'OTN KML file'),
+              onBytesSent: onUploadBytes,
+              endpoint: '/api/survey/photo-upload-url',
+              keyName: 'photoKey',
+            );
+      file
+        ..['uploadKey'] = key
+        ..['syncState'] = 'UPLOADED';
+      (evidence['kmlFiles'] as List<String>).add(key);
+      await onUploadProgress?.call();
+    }
+    final startLocation = _locationOf(start);
+    final endLocation = _locationOf(end);
+    final description = report['description']?.toString() ?? '';
+    final otnId = report['otnId']?.toString().trim();
+    final selectedCodes = segments.map((segment) => segment.segmentCode).join(', ');
+    final startPhoto = start == null ? null : _mediaPayload(start, start['uploadKey'].toString(), 'Start Photo');
+    final endPhoto = end == null ? null : _mediaPayload(end, end['uploadKey'].toString(), 'End Photo');
+    final routeVideos = evidence['routeVideos'] as List<Map<String, dynamic>>;
+    final endVideos = evidence['endVideos'] as List<Map<String, dynamic>>;
+    final additionalStartPhotos = (evidence['photos'] as List<Map<String, dynamic>>)
+        .where((photo) => photo['label'] == 'Additional Photo').toList();
+    final fieldData = <String, dynamic>{
+      'surveyKind': 'OTN',
+      if (otnId?.isNotEmpty == true) 'otnId': otnId,
+      'currentStep': 1,
+      'remarks': description,
+      'proposedOtn': {
+        if (otnId?.isNotEmpty == true) 'otnId': otnId,
+        'otnDetails': description,
+        'description': description,
+        'reason': report['otnReason']?.toString() ?? '',
+        'affectedScope': report['affectedScope']?.toString().trim().isNotEmpty == true
+            ? report['affectedScope']
+            : selectedCodes,
+        'subtype1': report['otnSubtype1']?.toString() ?? '',
+        'subtype2': report['otnSubtype2']?.toString() ?? '',
+        if (startLocation['latitude'] != null) 'sLatitude': startLocation['latitude'],
+        if (startLocation['longitude'] != null) 'sLongitude': startLocation['longitude'],
+        if (endLocation['latitude'] != null) 'eLatitude': endLocation['latitude'],
+        if (endLocation['longitude'] != null) 'eLongitude': endLocation['longitude'],
+        if (startPhoto != null) 'startPhoto': startPhoto,
+        if (endPhoto != null) 'endPhoto': endPhoto,
+        'additionalStartPhotos': additionalStartPhotos,
+        'additionalEndPhotos': <dynamic>[],
+        'additionalRouteVideos': routeVideos,
+        'additionalEndVideos': endVideos,
+        if ((evidence['kmlFiles'] as List).isNotEmpty) 'kmlFiles': evidence['kmlFiles'],
+      },
+    };
+    final body = {'taskId': taskId, 'fieldData': fieldData, 'attachmentKeys': const <String>[]};
+    await onBeforeSave?.call();
+    await _api.post('${AppConstants.ilyncApiBaseUrl}/api/tasks/save', body: body);
+    await onBeforeSubmit?.call();
+    final submitted = await _api.post('${AppConstants.ilyncApiBaseUrl}/api/tasks/submit', body: body);
+    _validateSubmitStatus(submitted);
+    final submittedId = _nestedMap(submitted, 'data')?['id']?.toString();
+    return submittedId?.isNotEmpty == true ? submittedId! : taskId;
   }
 
   Future<String> submit({
@@ -250,11 +421,14 @@ class HindranceSubmissionService {
     required Map<String, dynamic> report,
     String? existingTaskId,
     Future<void> Function(String taskId)? onTaskCreated,
+    Future<void> Function()? onBeforeSave,
+    Future<void> Function()? onBeforeSubmit,
     Future<void> Function()? onUploadProgress,
+    Future<void> Function(int bytesSent)? onUploadBytes,
   }) async {
-    final token = AuthStorageService().devTaskAccessToken;
+    final token = _taskToken;
     if (token == null || token.isEmpty) {
-      throw StateError('Sign in again to establish Dev task-service access.');
+      throw StateError('Sign in again to establish $_environmentLabel task-service access.');
     }
     _api.setAuthToken(token);
     var taskId = existingTaskId;
@@ -281,6 +455,7 @@ class HindranceSubmissionService {
       media,
       (report['shpFiles'] as List? ?? const []).whereType<Map>().toList(),
       onUploadProgress: onUploadProgress,
+      onUploadBytes: onUploadBytes,
     );
     final start = _mediaForSlot(media, 'start_point');
     final end = _mediaForSlot(media, 'end_point');
@@ -337,9 +512,14 @@ class HindranceSubmissionService {
       'fieldData': fieldData,
       'attachmentKeys': const <String>[],
     };
-    await _api.post('${AppConstants.devApiBaseUrl}/api/tasks/save', body: body);
+    await onBeforeSave?.call();
+    await _api.post(
+      '${AppConstants.ilyncApiBaseUrl}/api/tasks/save',
+      body: body,
+    );
+    await onBeforeSubmit?.call();
     final submitted = await _api.post(
-      '${AppConstants.devApiBaseUrl}/api/tasks/submit',
+      '${AppConstants.ilyncApiBaseUrl}/api/tasks/submit',
       body: body,
     );
     _validateSubmitStatus(submitted);
@@ -357,6 +537,7 @@ class HindranceSubmissionService {
     List<Map<String, dynamic>> media,
     List<Map> shpFiles, {
     Future<void> Function()? onUploadProgress,
+    Future<void> Function(int bytesSent)? onUploadBytes,
   }) async {
     final result = <String, dynamic>{
       'photos': <Map<String, dynamic>>[],
@@ -377,6 +558,7 @@ class HindranceSubmissionService {
           field: 'hindrance-${slot.isEmpty ? 'evidence' : slot}-${++index}',
           contentType: mime,
           bytes: await _requiredBytes(item, 'Hindrance evidence'),
+          onBytesSent: onUploadBytes,
           endpoint: kind == 'video'
               ? '/api/survey/v2/video-upload-url'
               : '/api/survey/v2/photo-upload-url',
@@ -427,6 +609,7 @@ class HindranceSubmissionService {
           field: 'hindrance-shp-${++index}',
           contentType: 'application/octet-stream',
           bytes: await _requiredBytes(file, 'SHP component $name'),
+          onBytesSent: onUploadBytes,
           endpoint: '/api/survey/v2/photo-upload-url',
           keyName: 'photoKey',
         );
@@ -449,6 +632,7 @@ class HindranceSubmissionService {
     required List<int> bytes,
     required String endpoint,
     required String keyName,
+    Future<void> Function(int bytesSent)? onBytesSent,
   }) async {
     final upload = await _api.get(
       '$endpoint?taskId=${Uri.encodeQueryComponent(taskId)}&'
@@ -461,7 +645,12 @@ class HindranceSubmissionService {
     if (url == null || url.isEmpty || key == null || key.isEmpty) {
       throw StateError('Upload service returned an incomplete URL for $field.');
     }
-    await _api.putRawBytes(url, bytes, contentType: contentType);
+    await _api.putRawBytes(
+      url,
+      bytes,
+      contentType: contentType,
+      onBytesSent: onBytesSent,
+    );
     return key;
   }
 
@@ -495,6 +684,7 @@ class HindranceSubmissionService {
     return {
       'label': label,
       'photoUrl': key,
+      'remarks': location['remarks']?.toString() ?? label,
       if (capturedAt != null) 'capturedAt': capturedAt.millisecondsSinceEpoch,
       if (location['latitude'] != null) 'latitude': location['latitude'],
       if (location['longitude'] != null) 'longitude': location['longitude'],
@@ -526,18 +716,24 @@ class HindranceSubmissionService {
     String taskId,
     List<dynamic> media, {
     required String fieldPrefix,
+    Future<void> Function(int bytesSent)? onUploadBytes,
   }) async {
     final photos = <Map<String, dynamic>>[];
     for (final item in media) {
-      if (item is! Map || item['kind'] != 'photo') continue;
+      if (item is! Map ||
+          (item['kind'] != 'photo' && item['kind'] != 'video')) {
+        continue;
+      }
       final bytes = await _readMedia(item);
       if (bytes == null) {
-        throw StateError('A saved $fieldPrefix photo could not be read.');
+        throw StateError('A saved $fieldPrefix evidence file could not be read.');
       }
+      final contentType = _contentType(item);
       final upload = await _api.get(
         '/api/survey/photo-upload-url?'
         'taskId=${Uri.encodeQueryComponent(taskId)}&'
-        'field=$fieldPrefix-${photos.length + 1}&contentType=image/jpeg',
+        'field=${Uri.encodeQueryComponent('$fieldPrefix-${item['slot'] ?? photos.length + 1}')}'
+        '&contentType=${Uri.encodeQueryComponent(contentType)}',
       );
       final uploadData = _nestedMap(upload, 'data') ?? <String, dynamic>{};
       final uploadUrl = uploadData['uploadUrl']?.toString();
@@ -545,7 +741,12 @@ class HindranceSubmissionService {
       if (uploadUrl == null || photoKey == null) {
         throw StateError('Photo service returned an incomplete upload URL.');
       }
-      await _api.putRawBytes(uploadUrl, bytes, contentType: 'image/jpeg');
+      await _api.putRawBytes(
+        uploadUrl,
+        bytes,
+        contentType: contentType,
+        onBytesSent: onUploadBytes,
+      );
       final location = item['location'] is Map
           ? Map<String, dynamic>.from(item['location'] as Map)
           : <String, dynamic>{};
@@ -583,7 +784,7 @@ class HindranceSubmissionService {
         ? ''
         : '?source=BOQ_IMPORT&revisionNo=${Uri.encodeQueryComponent(revisionNo)}';
     final response = await _api.get(
-      '${AppConstants.devApiBaseUrl}/geo/api/boq/routes/by-block/'
+      '${AppConstants.ilyncApiBaseUrl}/geo/api/boq/routes/by-block/'
       '${Uri.encodeComponent(planId)}$revisionQuery',
     );
     final data = _nestedMap(response, 'data');
@@ -647,7 +848,7 @@ class HindranceSubmissionService {
     String? preferredPlanId,
   ) async {
     final plansResponse = await _api.get(
-      '${AppConstants.devApiBaseUrl}/geo/api/boq/plans?'
+      '${AppConstants.ilyncApiBaseUrl}/geo/api/boq/plans?'
       'blockId=${Uri.encodeQueryComponent(blockId)}&size=50',
     );
     final plansData = _nestedMap(plansResponse, 'data') ?? <String, dynamic>{};
@@ -666,7 +867,7 @@ class HindranceSubmissionService {
       plans.map((plan) async {
         final planId = (plan['id'] ?? plan['planId']).toString();
         final response = await _api.get(
-          '${AppConstants.devApiBaseUrl}/geo/api/boq/plans/'
+          '${AppConstants.ilyncApiBaseUrl}/geo/api/boq/plans/'
           '${Uri.encodeComponent(planId)}/revisions',
         );
         final data = response is Map ? response['data'] : null;

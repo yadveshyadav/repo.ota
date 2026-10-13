@@ -23,7 +23,7 @@ abstract class AuthRepository {
   String? getAccessToken();
 }
 
-/// AuthRepository consuming Dev authentication and task APIs.
+/// AuthRepository consuming IlYnc UAT authentication and task APIs.
 class ApiAuthRepository implements AuthRepository {
   final AuthApiService apiService;
   final AuthStorageService storageService;
@@ -33,12 +33,13 @@ class ApiAuthRepository implements AuthRepository {
     ApiClient? apiClient,
     AuthApiService? apiService,
     AuthStorageService? storageService,
-  }) : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.devApiBaseUrl),
+  }) : apiClient =
+           apiClient ?? ApiClient(baseUrl: AppConstants.ilyncApiBaseUrl),
        apiService =
            apiService ??
            AuthApiService(
              apiClient:
-                 apiClient ?? ApiClient(baseUrl: AppConstants.devApiBaseUrl),
+                 apiClient ?? ApiClient(baseUrl: AppConstants.ilyncApiBaseUrl),
            ),
        storageService = storageService ?? AuthStorageService();
 
@@ -101,24 +102,24 @@ class ApiAuthRepository implements AuthRepository {
         password: password,
       );
 
-      // The Dev login token also authenticates Hindrance task reads and
-      // merged-task creation.
+      // Keep the task API session separate from the selected HERO fleet
+      // session; its environment follows this build's IlYnc flavor.
       final token = AuthToken.fromJson(responseJson);
 
       if (token.accessToken.isNotEmpty) {
-        if (apiService.lastLoginWasDev) {
-          await storageService.saveDevTaskAccessToken(token.accessToken);
+        if (apiService.lastLoginWasIlYnc) {
+          await _saveIlYncTaskToken(token.accessToken);
         } else {
           try {
-            final devTaskToken = await apiService.loginForDevTasks(
+            final ilyncTaskToken = await apiService.loginForIlYncTasks(
               phoneNumber: cleanUsername,
               password: password,
             );
-            await storageService.saveDevTaskAccessToken(devTaskToken);
+            await _saveIlYncTaskToken(ilyncTaskToken);
           } catch (error) {
             if (kDebugMode) {
               print(
-                '[AuthRepository] HERO login succeeded, but Dev task access could not be established: $error',
+                '[AuthRepository] HERO login succeeded, but ${AppConstants.ilyncEnvironment.toUpperCase()} task access could not be established: $error',
               );
             }
           }
@@ -140,7 +141,7 @@ class ApiAuthRepository implements AuthRepository {
           userData = responseJson['data'] as Map<String, dynamic>;
         }
 
-        final user = userData != null
+        var user = userData != null
             ? UserModel.fromJson(userData)
             : UserModel(
                 id: '1',
@@ -151,7 +152,24 @@ class ApiAuthRepository implements AuthRepository {
               );
 
         // Persist session and initialize Central Authorization Service
-        await storageService.saveSession(token: token, user: user);
+        await storageService.saveSession(
+          token: token,
+          user: user,
+          authBaseUrl: apiService.activeAuthBaseUrl,
+        );
+        // Login responses can omit role, assignment, or permission fields.
+        // Hydrate the profile from the same host that accepted the credentials
+        // before machine/attendance scope is calculated.
+        final profile = await apiService
+            .fetchCurrentUser(
+              baseUrl: apiService.activeAuthBaseUrl,
+              accessToken: token.accessToken,
+            )
+            .timeout(const Duration(seconds: 6), onTimeout: () => null);
+        if (profile != null && profile.id.trim().isNotEmpty) {
+          user = profile;
+          await storageService.updateUser(profile);
+        }
         AuthorizationService.instance.initialize(user: user);
 
         // Preload API-backed block/ring/segment choices after login; cached
@@ -230,6 +248,10 @@ class ApiAuthRepository implements AuthRepository {
     throw Exception('Invalid username or password.');
   }
 
+  Future<void> _saveIlYncTaskToken(String token) => AppConstants.ilyncIsDev
+      ? storageService.saveDevTaskAccessToken(token)
+      : storageService.saveUatTaskAccessToken(token);
+
   @override
   Future<void> logout() async {
     await storageService.clearSession();
@@ -246,7 +268,10 @@ class ApiAuthRepository implements AuthRepository {
     if (storageService.isLoggedIn && storageService.accessToken != null) {
       apiClient.setAuthToken(storageService.accessToken!);
       try {
-        final user = await apiService.fetchCurrentUser();
+        final user = await apiService.fetchCurrentUser(
+          baseUrl: storageService.authBaseUrl ?? apiService.activeAuthBaseUrl,
+          accessToken: storageService.accessToken,
+        );
         if (user != null) {
           storageService.updateUser(user);
           AuthorizationService.instance.initialize(user: user);

@@ -13,6 +13,11 @@ class TaskSegmentModel {
   final double? startLng;
   final double? targetLat;
   final double? targetLng;
+  final String? groupStart;
+  final String? groupEnd;
+  final String? groupStartId;
+  final String? groupEndId;
+  final int? sequenceNo;
 
   const TaskSegmentModel({
     this.taskId,
@@ -24,6 +29,11 @@ class TaskSegmentModel {
     this.startLng,
     this.targetLat,
     this.targetLng,
+    this.groupStart,
+    this.groupEnd,
+    this.groupStartId,
+    this.groupEndId,
+    this.sequenceNo,
   });
 
   factory TaskSegmentModel.fromJson(dynamic json) {
@@ -63,6 +73,13 @@ class TaskSegmentModel {
       startLng: parseCoord(json['startLng'] ?? json['start_lng']),
       targetLat: parseCoord(json['targetLat'] ?? json['target_lat']),
       targetLng: parseCoord(json['targetLng'] ?? json['target_lng']),
+      groupStart: json['groupStart']?.toString(),
+      groupEnd: json['groupEnd']?.toString(),
+      groupStartId: json['groupStartId']?.toString(),
+      groupEndId: json['groupEndId']?.toString(),
+      sequenceNo: int.tryParse(
+        (json['sequenceNo'] ?? json['sequence_no'])?.toString() ?? '',
+      ),
     );
   }
 
@@ -76,6 +93,12 @@ class TaskSegmentModel {
     if (startLng != null) 'startLng': startLng,
     if (targetLat != null) 'targetLat': targetLat,
     if (targetLng != null) 'targetLng': targetLng,
+    if (groupStart != null && groupStart!.isNotEmpty) 'groupStart': groupStart,
+    if (groupEnd != null && groupEnd!.isNotEmpty) 'groupEnd': groupEnd,
+    if (groupStartId != null && groupStartId!.isNotEmpty)
+      'groupStartId': groupStartId,
+    if (groupEndId != null && groupEndId!.isNotEmpty) 'groupEndId': groupEndId,
+    if (sequenceNo != null) 'sequenceNo': sequenceNo,
   };
 }
 

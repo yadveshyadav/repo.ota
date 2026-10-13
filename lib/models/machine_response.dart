@@ -16,7 +16,10 @@ class MachineResponse {
   });
 
   /// Returns a new MachineResponse filtered strictly to the assigned user scope.
-  MachineResponse filteredForUser(UserModel? user, {List<Machine>? assignedList}) {
+  MachineResponse filteredForUser(
+    UserModel? user, {
+    List<Machine>? assignedList,
+  }) {
     if (user == null || user.isAdmin) {
       return this;
     }
@@ -67,7 +70,8 @@ class MachineResponse {
       // 2. Vendor match for any user associated with vendor(s)
       if (userVendorNames.isNotEmpty) {
         for (final uv in userVendorNames) {
-          if (mVendor.isNotEmpty && (mVendor == uv || mVendor.contains(uv) || uv.contains(mVendor))) {
+          if (mVendor.isNotEmpty &&
+              (mVendor == uv || mVendor.contains(uv) || uv.contains(mVendor))) {
             return true;
           }
         }
@@ -109,8 +113,12 @@ class MachineResponse {
         'RUNNING': filteredMachines.where((m) => m.isWorking).length,
         'IDLE': filteredMachines.where((m) => m.isIdle).length,
         'OFFLINE': filteredMachines.where((m) => m.isOffline).length,
-        'MAINTENANCE': filteredMachines.where((m) => m.isMaintenance || m.isUnderBreakdown).length,
-        'COMMISSIONED': filteredMachines.where((m) => m.isCommissioned == true).length,
+        'MAINTENANCE': filteredMachines
+            .where((m) => m.isMaintenance || m.isUnderBreakdown)
+            .length,
+        'COMMISSIONED': filteredMachines
+            .where((m) => m.isCommissioned == true)
+            .length,
       },
     );
   }
@@ -122,12 +130,15 @@ class MachineResponse {
       statusCounts['IDLE'] ?? machines.where((m) => m.isIdle).length;
 
   int get maintenanceCount {
-    final bdCount = statusCounts['BREAKDOWN'] ??
+    final bdCount =
+        statusCounts['BREAKDOWN'] ??
         statusCounts['UNDER_BREAKDOWN'] ??
         statusCounts['UNDER BREAKDOWN'] ??
         statusCounts['MAINTENANCE'] ??
         0;
-    final codeCount = machines.where((m) => m.isMaintenance || m.isUnderBreakdown).length;
+    final codeCount = machines
+        .where((m) => m.isMaintenance || m.isUnderBreakdown)
+        .length;
     return bdCount > codeCount ? bdCount : codeCount;
   }
 
@@ -135,19 +146,39 @@ class MachineResponse {
       statusCounts['OFFLINE'] ?? machines.where((m) => m.isOffline).length;
 
   int get commissionedCount =>
-      statusCounts['COMMISSIONED'] ?? machines.where((m) => m.isCommissioned == true).length;
+      statusCounts['COMMISSIONED'] ??
+      machines.where((m) => m.isCommissioned == true).length;
 
   factory MachineResponse.fromJson(Map<String, dynamic> json) {
-    final success = json['success'] as bool? ?? true;
+    const listKeys = [
+      'machines',
+      'assigned_machines',
+      'results',
+      'items',
+      'records',
+      'content',
+      'svgdata',
+      'data',
+    ];
+    List<dynamic> findList(dynamic value, int depth) {
+      if (value is List) return value;
+      if (value is! Map || depth > 4) return const [];
+      for (final key in listKeys) {
+        final candidate = value[key];
+        if (candidate is List) return candidate;
+      }
+      for (final key in listKeys) {
+        final candidate = value[key];
+        if (candidate is Map) {
+          final nested = findList(candidate, depth + 1);
+          if (nested.isNotEmpty) return nested;
+        }
+      }
+      return const [];
+    }
 
-    final rawList = json['data'] ??
-        json['results'] ??
-        json['content'] ??
-        json['machines'] ??
-        json['items'] ??
-        json['records'] ??
-        json['svgdata'];
-    final List<dynamic> dataList = rawList is List ? rawList : [];
+    final success = json['success'] as bool? ?? true;
+    final List<dynamic> dataList = findList(json, 0);
     final machines = dataList
         .whereType<Map<String, dynamic>>()
         .map((item) => Machine.fromJson(item))
@@ -163,8 +194,22 @@ class MachineResponse {
     }
 
     final statusCountsMap = <String, int>{};
-    if (json.containsKey('status_counts') && json['status_counts'] is Map<String, dynamic>) {
-      final rawMap = json['status_counts'] as Map<String, dynamic>;
+    dynamic findStatusCounts(dynamic value, int depth) {
+      if (value is! Map || depth > 4) return null;
+      if (value['status_counts'] is Map) return value['status_counts'];
+      for (final key in listKeys) {
+        final nested = value[key];
+        if (nested is Map) {
+          final result = findStatusCounts(nested, depth + 1);
+          if (result != null) return result;
+        }
+      }
+      return null;
+    }
+
+    final rawStatusCounts = findStatusCounts(json, 0);
+    if (rawStatusCounts is Map) {
+      final rawMap = Map<String, dynamic>.from(rawStatusCounts);
       rawMap.forEach((k, v) {
         statusCountsMap[k.toUpperCase()] = parseNum(v);
       });
@@ -172,15 +217,12 @@ class MachineResponse {
 
     int computedTotal = statusCountsMap['ALL'] ?? 0;
     if (computedTotal == 0) {
-      if (json.containsKey('total') && json['total'] != null) {
-        computedTotal = parseNum(json['total']);
-      } else if (json.containsKey('svgtotal') && json['svgtotal'] != null) {
-        computedTotal = parseNum(json['svgtotal']);
-      } else if (json.containsKey('meta') && json['meta'] is Map<String, dynamic>) {
-        final meta = json['meta'] as Map<String, dynamic>;
+      final total = _findCount(json, const ['total', 'svgtotal', 'count'], 0);
+      final meta = _findMap(json, 'meta', 0);
+      if (total != null) {
+        computedTotal = parseNum(total);
+      } else if (meta != null) {
         computedTotal = parseNum(meta['count'] ?? meta['total']);
-      } else if (json.containsKey('count') && json['count'] != null) {
-        computedTotal = parseNum(json['count']);
       } else {
         computedTotal = machines.length;
       }
@@ -198,10 +240,52 @@ class MachineResponse {
     );
   }
 
+  static dynamic _findCount(dynamic value, List<String> keys, int depth) {
+    if (value is! Map || depth > 4) return null;
+    for (final key in keys) {
+      if (value[key] != null && value[key] is! Map && value[key] is! List) {
+        return value[key];
+      }
+    }
+    for (final key in const [
+      'data',
+      'results',
+      'content',
+      'machines',
+      'items',
+    ]) {
+      final nested = value[key];
+      if (nested is Map) {
+        final result = _findCount(nested, keys, depth + 1);
+        if (result != null) return result;
+      }
+    }
+    return null;
+  }
+
+  static Map<String, dynamic>? _findMap(dynamic value, String key, int depth) {
+    if (value is! Map || depth > 4) return null;
+    if (value[key] is Map) return Map<String, dynamic>.from(value[key] as Map);
+    for (final nestedKey in const [
+      'data',
+      'results',
+      'content',
+      'machines',
+      'items',
+    ]) {
+      final nested = value[nestedKey];
+      if (nested is Map) {
+        final result = _findMap(nested, key, depth + 1);
+        if (result != null) return result;
+      }
+    }
+    return null;
+  }
+
   Map<String, dynamic> toJson() => {
-        'success': success,
-        'data': machines.map((m) => m.toJson()).toList(),
-        'total': total,
-        'status_counts': statusCounts,
-      };
+    'success': success,
+    'data': machines.map((m) => m.toJson()).toList(),
+    'total': total,
+    'status_counts': statusCounts,
+  };
 }

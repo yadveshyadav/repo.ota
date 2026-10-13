@@ -200,6 +200,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       Navigator.of(context).pushNamed(AppRoutes.tasks);
     } else if (route == 'Hindrance') {
       Navigator.of(context).pushNamed(AppRoutes.hindrance);
+    } else if (route == 'OTN') {
+      Navigator.of(context).pushNamed(AppRoutes.otn);
     } else if (route == 'CCN') {
       Navigator.of(context).pushNamed(AppRoutes.ccn);
     } else if (route == 'Team') {
@@ -406,6 +408,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   _handleRouteSelected(filter),
                             ),
 
+                          if (_summary != null) ...[
+                            const SizedBox(height: 12),
+                            _buildWorkflowShortcuts(),
+                          ],
+
                           const SizedBox(height: 16),
 
                           // 4. Machine Status & Fuel Status Cards
@@ -472,6 +479,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildWorkflowShortcuts() => Row(
+    children: [
+      Expanded(
+        child: _WorkflowShortcutCard(
+          label: 'Hindrance',
+          icon: Icons.warning_amber_rounded,
+          color: AppColors.warningAmber,
+          onTap: () => _handleRouteSelected('Hindrance'),
+        ),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: _WorkflowShortcutCard(
+          label: 'CCN',
+          icon: Icons.assignment_late_outlined,
+          color: const Color(0xFF7C3AED),
+          onTap: () => _handleRouteSelected('CCN'),
+        ),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: _WorkflowShortcutCard(
+          label: 'OTN',
+          icon: Icons.route_outlined,
+          color: AppColors.infoBlue,
+          onTap: () => _handleRouteSelected('OTN'),
+        ),
+      ),
+    ],
+  );
+
   Widget _buildErrorView() {
     return Center(
       child: Padding(
@@ -505,4 +543,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
+
+class _WorkflowShortcutCard extends StatelessWidget {
+  const _WorkflowShortcutCard({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(14),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 82),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.borderGray),
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.shadowColor,
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 23),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.deepNavy,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

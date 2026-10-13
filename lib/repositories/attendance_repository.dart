@@ -44,6 +44,7 @@ abstract class AttendanceRepository {
   // Standard Attendance API methods
   Future<AttendanceModel?> getTodayAttendance();
   Future<List<Machine>> getAssignedMachines(String userId);
+  Future<List<Machine>> getTeamAttendanceMachines(String userId);
   Future<List<UserModel>> getAuthorizedTeamMembers(String supervisorId);
   Future<AttendanceModel> checkInMachine({
     required Machine machine,
@@ -84,9 +85,7 @@ abstract class AttendanceRepository {
     int page = 0,
     String? statusFilter,
   });
-  Future<List<AttendanceModel>> getPendingApprovals({
-    int page = 0,
-  });
+  Future<List<AttendanceModel>> getPendingApprovals({int page = 0});
   Future<bool> approveAttendance(String attendanceId);
   Future<bool> rejectAttendance(String attendanceId, String reason);
   Future<int> syncPendingRecords();
@@ -104,9 +103,9 @@ class LocalAttendanceRepository implements AttendanceRepository {
     AttendanceStorageService? storageService,
     MachineRepository? machineRepository,
     UserRepository? userRepository,
-  })  : storageService = storageService ?? AttendanceStorageService(),
-        machineRepository = machineRepository ?? MockMachineRepository(),
-        userRepository = userRepository ?? ApiUserRepository();
+  }) : storageService = storageService ?? AttendanceStorageService(),
+       machineRepository = machineRepository ?? MockMachineRepository(),
+       userRepository = userRepository ?? ApiUserRepository();
 
   @override
   Future<DailyMuster?> getTodaysMuster(String taskId) async {
@@ -121,7 +120,10 @@ class LocalAttendanceRepository implements AttendanceRepository {
   }
 
   @override
-  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body) async {
+  Future<DailyMuster> createMuster(
+    String taskId,
+    Map<String, dynamic> body,
+  ) async {
     final cleanTaskId = taskId.trim();
     final id = 'muster_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -141,7 +143,9 @@ class LocalAttendanceRepository implements AttendanceRepository {
       vendorId: body['vendorId']?.toString() ?? 'VEND-01',
       vendorName: body['vendorName']?.toString() ?? 'Hero Vendor',
       headcount: body['headcount'] as int? ?? 1,
-      resources: body['resources'] is List ? body['resources'] as List : const [],
+      resources: body['resources'] is List
+          ? body['resources'] as List
+          : const [],
       entries: entryList,
       nilWork: body['nilWork'] as bool? ?? false,
       nilWorkReason: body['nilWorkReason']?.toString(),
@@ -163,7 +167,10 @@ class LocalAttendanceRepository implements AttendanceRepository {
   }
 
   @override
-  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body) async {
+  Future<DailyMuster> updateMuster(
+    String musterId,
+    Map<String, dynamic> body,
+  ) async {
     final existing = _localMusters[musterId];
 
     List<MusterEntry> updatedEntries = existing?.entries ?? [];
@@ -174,15 +181,18 @@ class LocalAttendanceRepository implements AttendanceRepository {
           .toList();
     }
 
-    final updated = (existing ?? DailyMuster(
-      id: musterId,
-      clientMusterId: musterId,
-      workedOnTaskIds: const [],
-    )).copyWith(
-      entries: updatedEntries,
-      remarks: body['remarks']?.toString() ?? existing?.remarks ?? '',
-      updatedAt: DateTime.now(),
-    );
+    final updated =
+        (existing ??
+                DailyMuster(
+                  id: musterId,
+                  clientMusterId: musterId,
+                  workedOnTaskIds: const [],
+                ))
+            .copyWith(
+              entries: updatedEntries,
+              remarks: body['remarks']?.toString() ?? existing?.remarks ?? '',
+              updatedAt: DateTime.now(),
+            );
 
     _localMusters[musterId] = updated;
     return updated;
@@ -210,7 +220,10 @@ class LocalAttendanceRepository implements AttendanceRepository {
   }
 
   @override
-  Future<bool> approveMuster(String musterId, {String remarks = 'Attendance approved'}) async {
+  Future<bool> approveMuster(
+    String musterId, {
+    String remarks = 'Attendance approved',
+  }) async {
     final existing = _localMusters[musterId];
     if (existing != null) {
       _localMusters[musterId] = existing.copyWith(
@@ -263,7 +276,8 @@ class LocalAttendanceRepository implements AttendanceRepository {
     required String entryId,
     String contentType = 'image/jpeg',
   }) async {
-    final key = 'attendance/${DateTime.now().year}/${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().day.toString().padLeft(2, '0')}/${musterId}_$entryId.jpg';
+    final key =
+        'attendance/${DateTime.now().year}/${DateTime.now().month.toString().padLeft(2, '0')}/${DateTime.now().day.toString().padLeft(2, '0')}/${musterId}_$entryId.jpg';
     return PhotoUploadUrlResponse(
       success: true,
       data: PhotoUploadData(
@@ -331,33 +345,61 @@ class LocalAttendanceRepository implements AttendanceRepository {
 
       if (m.operatorInfo is Map) {
         final map = m.operatorInfo as Map;
-        mOpName = (map['name'] ?? map['operator_name'] ?? map['userName'] ?? '').toString().trim().toLowerCase();
-        mOpMobile = (map['mobile'] ?? map['phoneNumber'] ?? '').toString().trim().toLowerCase();
-        mOpUserId = (map['id'] ?? map['user_id'] ?? map['userId'] ?? '').toString().trim().toLowerCase();
+        mOpName = (map['name'] ?? map['operator_name'] ?? map['userName'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        mOpMobile = (map['mobile'] ?? map['phoneNumber'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        mOpUserId = (map['id'] ?? map['user_id'] ?? map['userId'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
       } else if (m.operatorInfo != null) {
         mOpName = m.operatorInfo.toString().trim().toLowerCase();
       }
 
       // 1. Direct Operator Match
       final bool isOperatorMatch =
-          (mOpUserId.isNotEmpty && (mOpUserId == cleanUserId || mOpUserId == currentUserId)) ||
+          (mOpUserId.isNotEmpty &&
+              (mOpUserId == cleanUserId || mOpUserId == currentUserId)) ||
           (mOpName.isNotEmpty &&
-              ((displayName.isNotEmpty && (mOpName.contains(displayName) || displayName.contains(mOpName))) ||
-              (username.isNotEmpty && (mOpName.contains(username) || username.contains(mOpName))) ||
-              (name.isNotEmpty && (mOpName.contains(name) || name.contains(mOpName))))) ||
-          (mOpMobile.isNotEmpty && phone.isNotEmpty && (mOpMobile.contains(phone) || phone.contains(mOpMobile))) ||
-          (empId.isNotEmpty && (mChassis.contains(empId) || mOpName.contains(empId)));
+              ((displayName.isNotEmpty &&
+                      (mOpName.contains(displayName) ||
+                          displayName.contains(mOpName))) ||
+                  (username.isNotEmpty &&
+                      (mOpName.contains(username) ||
+                          username.contains(mOpName))) ||
+                  (name.isNotEmpty &&
+                      (mOpName.contains(name) || name.contains(mOpName))))) ||
+          (mOpMobile.isNotEmpty &&
+              phone.isNotEmpty &&
+              (mOpMobile.contains(phone) || phone.contains(mOpMobile))) ||
+          (empId.isNotEmpty &&
+              (mChassis.contains(empId) || mOpName.contains(empId)));
 
       // 2. Vendor Match
-      final bool isVendorMatch = VendorUtils.isVendorMatch(m.vendorName, user?.vendorName) ||
+      final bool isVendorMatch =
+          VendorUtils.isVendorMatch(m.vendorName, user?.vendorName) ||
           VendorUtils.isVendorMatch(m.vendorName, user?.displayVendor) ||
-          (user != null && user.vendors.isNotEmpty && VendorUtils.matchesUserVendors(m.vendorName, user.vendors.map((v) => v['name']?.toString() ?? '').toSet()));
+          (user != null &&
+              user.vendors.isNotEmpty &&
+              VendorUtils.matchesUserVendors(
+                m.vendorName,
+                user.vendors.map((v) => v['name']?.toString() ?? '').toSet(),
+              ));
 
       return isOperatorMatch || isVendorMatch;
     }).toList();
 
     return matched;
   }
+
+  @override
+  Future<List<Machine>> getTeamAttendanceMachines(String userId) async =>
+      getAssignedMachines(userId);
 
   @override
   Future<List<UserModel>> getAuthorizedTeamMembers(String supervisorId) async {
@@ -377,7 +419,9 @@ class LocalAttendanceRepository implements AttendanceRepository {
   }) async {
     final user = AuthStorageService().currentUser;
     final userId = user?.id ?? '';
-    final userName = user?.displayName.isNotEmpty == true ? user!.displayName : (user?.username ?? '');
+    final userName = user?.displayName.isNotEmpty == true
+        ? user!.displayName
+        : (user?.username ?? '');
     final empId = user?.employeeId ?? '';
     final managerId = user?.reportingManagerId ?? '';
     final managerName = user?.reportingManagerName ?? '';
@@ -493,7 +537,9 @@ class LocalAttendanceRepository implements AttendanceRepository {
   }) async {
     final user = AuthStorageService().currentUser;
     final userId = user?.id ?? '';
-    final userName = user?.displayName.isNotEmpty == true ? user!.displayName : (user?.username ?? '');
+    final userName = user?.displayName.isNotEmpty == true
+        ? user!.displayName
+        : (user?.username ?? '');
     final empId = user?.employeeId ?? '';
     final managerId = user?.reportingManagerId ?? '';
     final managerName = user?.reportingManagerName ?? '';
@@ -552,7 +598,8 @@ class LocalAttendanceRepository implements AttendanceRepository {
     final all = await storageService.getAllRecords();
     final existing = all.firstWhere(
       (r) => r.id == attendanceId,
-      orElse: () => throw Exception('Attendance record not found for check-out'),
+      orElse: () =>
+          throw Exception('Attendance record not found for check-out'),
     );
 
     String? localPhotoPath;
@@ -572,7 +619,8 @@ class LocalAttendanceRepository implements AttendanceRepository {
       totalSec = now.difference(existing.checkInTime!).inSeconds;
       final hrs = totalSec ~/ 3600;
       final mins = (totalSec % 3600) ~/ 60;
-      formattedHours = '${hrs.toString().padLeft(2, '0')}h ${mins.toString().padLeft(2, '0')}m';
+      formattedHours =
+          '${hrs.toString().padLeft(2, '0')}h ${mins.toString().padLeft(2, '0')}m';
     }
 
     final updated = AttendanceModel(
@@ -625,9 +673,12 @@ class LocalAttendanceRepository implements AttendanceRepository {
     final records = await storageService.getAllRecords();
     if (statusFilter != null && statusFilter != 'ALL') {
       return records.where((r) {
-        if (statusFilter == 'APPROVED' || statusFilter == 'PRESENT') return r.isApproved || r.status == 'PRESENT';
-        if (statusFilter == 'PENDING') return r.isPendingApproval || r.status == 'PENDING';
-        if (statusFilter == 'REJECTED') return r.isRejected || r.status == 'REJECTED';
+        if (statusFilter == 'APPROVED' || statusFilter == 'PRESENT')
+          return r.isApproved || r.status == 'PRESENT';
+        if (statusFilter == 'PENDING')
+          return r.isPendingApproval || r.status == 'PENDING';
+        if (statusFilter == 'REJECTED')
+          return r.isRejected || r.status == 'REJECTED';
         return true;
       }).toList();
     }
@@ -644,12 +695,15 @@ class LocalAttendanceRepository implements AttendanceRepository {
     final records = await storageService.getAllRecords();
 
     if (user != null && user.isAdmin) {
-      return records.where((r) => r.isPendingApproval || r.status == 'PENDING').toList();
+      return records
+          .where((r) => r.isPendingApproval || r.status == 'PENDING')
+          .toList();
     }
 
     return records.where((r) {
       final isPending = r.isPendingApproval || r.status == 'PENDING';
-      final isAssignedManager = r.reportingManagerId == currentUserId ||
+      final isAssignedManager =
+          r.reportingManagerId == currentUserId ||
           (r.reportingManagerName != null &&
               (r.reportingManagerName!.toLowerCase() == currentUsername ||
                   r.reportingManagerName!.toLowerCase() == currentName));
@@ -670,12 +724,15 @@ class LocalAttendanceRepository implements AttendanceRepository {
       final existing = all[index];
 
       if (existing.userId == currentAdminId ||
-          existing.userName.toLowerCase() == currentAdminUsername.toLowerCase() ||
+          existing.userName.toLowerCase() ==
+              currentAdminUsername.toLowerCase() ||
           existing.userName.toLowerCase() == currentAdminName.toLowerCase()) {
         throw Exception('You cannot approve your own attendance.');
       }
 
-      final managerName = currentAdminName.isNotEmpty ? currentAdminName : currentAdminUsername;
+      final managerName = currentAdminName.isNotEmpty
+          ? currentAdminName
+          : currentAdminUsername;
 
       final updated = AttendanceModel(
         id: existing.id,
@@ -725,7 +782,8 @@ class LocalAttendanceRepository implements AttendanceRepository {
           recipientId: existing.userId,
           type: 'ATTENDANCE_APPROVED',
           title: 'Attendance Approved',
-          message: 'Your attendance for $dateStr has been approved by $managerName.',
+          message:
+              'Your attendance for $dateStr has been approved by $managerName.',
           attendanceId: existing.id,
           createdAt: DateTime.now(),
         ),
@@ -751,7 +809,9 @@ class LocalAttendanceRepository implements AttendanceRepository {
     final index = all.indexWhere((r) => r.id == attendanceId);
     if (index != -1) {
       final existing = all[index];
-      final managerName = currentAdminName.isNotEmpty ? currentAdminName : currentAdminUsername;
+      final managerName = currentAdminName.isNotEmpty
+          ? currentAdminName
+          : currentAdminUsername;
 
       final updated = AttendanceModel(
         id: existing.id,
@@ -802,7 +862,8 @@ class LocalAttendanceRepository implements AttendanceRepository {
           recipientId: existing.userId,
           type: 'ATTENDANCE_REJECTED',
           title: 'Attendance Rejected',
-          message: 'Your attendance for $dateStr has been rejected by $managerName. Reason: $cleanReason',
+          message:
+              'Your attendance for $dateStr has been rejected by $managerName. Reason: $cleanReason',
           reason: cleanReason,
           attendanceId: existing.id,
           createdAt: DateTime.now(),
@@ -825,8 +886,8 @@ class ApiAttendanceRepository implements AttendanceRepository {
   ApiAttendanceRepository({
     AttendanceApiService? apiService,
     LocalAttendanceRepository? localFallback,
-  })  : apiService = apiService ?? AttendanceApiService(),
-        localFallback = localFallback ?? LocalAttendanceRepository();
+  }) : apiService = apiService ?? AttendanceApiService(),
+       localFallback = localFallback ?? LocalAttendanceRepository();
 
   @override
   Future<DailyMuster?> getTodaysMuster(String taskId) async {
@@ -842,13 +903,18 @@ class ApiAttendanceRepository implements AttendanceRepository {
   }
 
   @override
-  Future<DailyMuster> createMuster(String taskId, Map<String, dynamic> body) async {
+  Future<DailyMuster> createMuster(
+    String taskId,
+    Map<String, dynamic> body,
+  ) async {
     try {
       final remote = await apiService.createMuster(taskId, body);
       return remote;
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote createMuster failed ($e), saving locally...');
+        print(
+          '[ApiAttendanceRepository] Remote createMuster failed ($e), saving locally...',
+        );
       }
       return await localFallback.createMuster(taskId, body);
     }
@@ -868,13 +934,18 @@ class ApiAttendanceRepository implements AttendanceRepository {
   }
 
   @override
-  Future<DailyMuster> updateMuster(String musterId, Map<String, dynamic> body) async {
+  Future<DailyMuster> updateMuster(
+    String musterId,
+    Map<String, dynamic> body,
+  ) async {
     try {
       final remote = await apiService.updateMuster(musterId, body);
       return remote;
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote updateMuster failed ($e), updating locally...');
+        print(
+          '[ApiAttendanceRepository] Remote updateMuster failed ($e), updating locally...',
+        );
       }
       return await localFallback.updateMuster(musterId, body);
     }
@@ -886,9 +957,14 @@ class ApiAttendanceRepository implements AttendanceRepository {
       return await apiService.submitMuster(musterId, stepUpToken: stepUpToken);
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote submitMuster failed ($e), submitting locally...');
+        print(
+          '[ApiAttendanceRepository] Remote submitMuster failed ($e), submitting locally...',
+        );
       }
-      return await localFallback.submitMuster(musterId, stepUpToken: stepUpToken);
+      return await localFallback.submitMuster(
+        musterId,
+        stepUpToken: stepUpToken,
+      );
     }
   }
 
@@ -906,7 +982,10 @@ class ApiAttendanceRepository implements AttendanceRepository {
   }
 
   @override
-  Future<bool> approveMuster(String musterId, {String remarks = 'Attendance approved'}) async {
+  Future<bool> approveMuster(
+    String musterId, {
+    String remarks = 'Attendance approved',
+  }) async {
     try {
       return await apiService.approveAttendance(musterId);
     } catch (e) {
@@ -973,7 +1052,9 @@ class ApiAttendanceRepository implements AttendanceRepository {
       );
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] getPhotoUploadUrl error ($e), falling back...');
+        print(
+          '[ApiAttendanceRepository] getPhotoUploadUrl error ($e), falling back...',
+        );
       }
       return await localFallback.getPhotoUploadUrl(
         musterId: musterId,
@@ -1049,27 +1130,40 @@ class ApiAttendanceRepository implements AttendanceRepository {
   @override
   Future<List<Machine>> getAssignedMachines(String userId) async {
     try {
-      final list = await apiService.fetchMyAssignedMachines();
-      if (list.isNotEmpty) return list;
+      return await apiService.fetchMyAssignedMachines();
     } catch (e) {
       if (kDebugMode) {
         print('[ApiAttendanceRepository] getAssignedMachines error: $e');
       }
+      // Do not substitute the demo/mock fleet for a signed-in account.
+      return const <Machine>[];
     }
-    return await localFallback.getAssignedMachines(userId);
+  }
+
+  @override
+  Future<List<Machine>> getTeamAttendanceMachines(String userId) async {
+    try {
+      return await apiService.fetchTeamAttendanceMachines();
+    } catch (e) {
+      if (kDebugMode) {
+        print('[ApiAttendanceRepository] getTeamAttendanceMachines error: $e');
+      }
+      // Keep the attendance roster empty on failure instead of showing the
+      // different, broader personal-assignment list.
+      return const <Machine>[];
+    }
   }
 
   @override
   Future<List<UserModel>> getAuthorizedTeamMembers(String supervisorId) async {
     try {
-      final list = await apiService.fetchAuthorizedTeamMembers();
-      if (list.isNotEmpty) return list;
+      return await apiService.fetchAuthorizedTeamMembers();
     } catch (e) {
       if (kDebugMode) {
         print('[ApiAttendanceRepository] getAuthorizedTeamMembers error: $e');
       }
+      return const <UserModel>[];
     }
-    return await localFallback.getAuthorizedTeamMembers(supervisorId);
   }
 
   @override
@@ -1085,7 +1179,9 @@ class ApiAttendanceRepository implements AttendanceRepository {
     try {
       final record = await apiService.checkInMachine(
         machineChassisNo: machine.machineChassisNo,
-        assignmentId: machine.id.isNotEmpty ? machine.id : machine.machineChassisNo,
+        assignmentId: machine.id.isNotEmpty
+            ? machine.id
+            : machine.machineChassisNo,
         latitude: latitude,
         longitude: longitude,
         accuracy: accuracy,
@@ -1097,7 +1193,9 @@ class ApiAttendanceRepository implements AttendanceRepository {
       return record;
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote checkInMachine failed ($e), saving locally...');
+        print(
+          '[ApiAttendanceRepository] Remote checkInMachine failed ($e), saving locally...',
+        );
       }
       return await localFallback.checkInMachine(
         machine: machine,
@@ -1135,7 +1233,9 @@ class ApiAttendanceRepository implements AttendanceRepository {
       return record;
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote checkInTeamMember failed ($e), saving locally...');
+        print(
+          '[ApiAttendanceRepository] Remote checkInTeamMember failed ($e), saving locally...',
+        );
       }
       return await localFallback.checkInTeamMember(
         targetMember: targetMember,
@@ -1171,7 +1271,9 @@ class ApiAttendanceRepository implements AttendanceRepository {
       return record;
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote checkIn failed ($e), saving locally...');
+        print(
+          '[ApiAttendanceRepository] Remote checkIn failed ($e), saving locally...',
+        );
       }
       return await localFallback.checkIn(
         latitude: latitude,
@@ -1208,7 +1310,9 @@ class ApiAttendanceRepository implements AttendanceRepository {
       return record;
     } catch (e) {
       if (kDebugMode) {
-        print('[ApiAttendanceRepository] Remote checkOut failed ($e), saving locally...');
+        print(
+          '[ApiAttendanceRepository] Remote checkOut failed ($e), saving locally...',
+        );
       }
       return await localFallback.checkOut(
         attendanceId: attendanceId,
@@ -1228,7 +1332,10 @@ class ApiAttendanceRepository implements AttendanceRepository {
     String? statusFilter,
   }) async {
     try {
-      final list = await apiService.fetchHistory(page: page, statusFilter: statusFilter);
+      final list = await apiService.fetchHistory(
+        page: page,
+        statusFilter: statusFilter,
+      );
       if (list.isNotEmpty) {
         for (final item in list) {
           await localFallback.storageService.saveRecord(item);
@@ -1240,13 +1347,14 @@ class ApiAttendanceRepository implements AttendanceRepository {
         print('[ApiAttendanceRepository] getHistory error: $e');
       }
     }
-    return await localFallback.getHistory(page: page, statusFilter: statusFilter);
+    return await localFallback.getHistory(
+      page: page,
+      statusFilter: statusFilter,
+    );
   }
 
   @override
-  Future<List<AttendanceModel>> getPendingApprovals({
-    int page = 0,
-  }) async {
+  Future<List<AttendanceModel>> getPendingApprovals({int page = 0}) async {
     try {
       final list = await apiService.fetchPendingApprovals(page: page);
       if (list.isNotEmpty) {
@@ -1278,78 +1386,87 @@ class ApiAttendanceRepository implements AttendanceRepository {
     final currentUser = AuthStorageService().currentUser;
     final currentUserId = currentUser?.id ?? '';
 
-    final results = await Future.wait(unsynced.map((record) async {
-      try {
-        List<int>? photoBytes;
-        final photoPath = record.checkInPhotoUrl ?? record.checkOutPhotoUrl;
-        if (photoPath != null &&
-            photoPath.isNotEmpty &&
-            !photoPath.startsWith('http') &&
-            !photoPath.startsWith('data:')) {
-          try {
-            final file = File(photoPath);
-            if (await file.exists()) {
-              photoBytes = await file.readAsBytes();
-            }
-          } catch (_) {}
+    final results = await Future.wait(
+      unsynced.map((record) async {
+        try {
+          List<int>? photoBytes;
+          final photoPath = record.checkInPhotoUrl ?? record.checkOutPhotoUrl;
+          if (photoPath != null &&
+              photoPath.isNotEmpty &&
+              !photoPath.startsWith('http') &&
+              !photoPath.startsWith('data:')) {
+            try {
+              final file = File(photoPath);
+              if (await file.exists()) {
+                photoBytes = await file.readAsBytes();
+              }
+            } catch (_) {}
+          }
+
+          AttendanceModel? synced;
+
+          final targetUserIdStr =
+              (record.markedForUserId != null &&
+                  record.markedForUserId!.isNotEmpty)
+              ? record.markedForUserId!
+              : record.userId;
+
+          if (record.isMachineAttendance) {
+            final chassis =
+                record.machineChassisNo ?? record.machineId ?? 'N/A';
+            synced = await apiService.checkInMachine(
+              machineChassisNo: chassis,
+              assignmentId: record.machineAssignmentId ?? chassis,
+              latitude: record.checkInLat ?? 0.0,
+              longitude: record.checkInLng ?? 0.0,
+              accuracy: record.checkInAccuracy ?? 10.0,
+              locationSource: record.locationSource ?? 'GPS',
+              photoBytes: photoBytes,
+            );
+          } else if (targetUserIdStr.isNotEmpty &&
+              (targetUserIdStr != currentUserId ||
+                  record.markedForUserId != null)) {
+            synced = await apiService.checkInTeamMember(
+              targetUserId: targetUserIdStr,
+              latitude: record.checkInLat ?? 0.0,
+              longitude: record.checkInLng ?? 0.0,
+              accuracy: record.checkInAccuracy ?? 10.0,
+              locationSource: record.locationSource ?? 'GPS',
+              photoBytes: photoBytes,
+            );
+          } else if (record.isCheckedOut && record.checkOutTime != null) {
+            synced = await apiService.checkOut(
+              attendanceId: record.id,
+              latitude: record.checkOutLat ?? record.checkInLat ?? 0.0,
+              longitude: record.checkOutLng ?? record.checkInLng ?? 0.0,
+              accuracy:
+                  record.checkOutAccuracy ?? record.checkInAccuracy ?? 10.0,
+              locationSource: record.locationSource ?? 'GPS',
+              photoBytes: photoBytes,
+            );
+          } else {
+            synced = await apiService.checkIn(
+              latitude: record.checkInLat ?? 0.0,
+              longitude: record.checkInLng ?? 0.0,
+              accuracy: record.checkInAccuracy ?? 10.0,
+              locationSource: record.locationSource ?? 'GPS',
+              photoBytes: photoBytes,
+            );
+          }
+
+          final updated = synced.copyWith(isSynced: true);
+          await localFallback.storageService.saveRecord(updated);
+          return 1;
+        } catch (e) {
+          if (kDebugMode) {
+            print(
+              '[ApiAttendanceRepository] Auto-sync error for attendance ${record.id}: $e',
+            );
+          }
+          return 0;
         }
-
-        AttendanceModel? synced;
-
-        final targetUserIdStr = (record.markedForUserId != null && record.markedForUserId!.isNotEmpty)
-            ? record.markedForUserId!
-            : record.userId;
-
-        if (record.isMachineAttendance) {
-          final chassis = record.machineChassisNo ?? record.machineId ?? 'N/A';
-          synced = await apiService.checkInMachine(
-            machineChassisNo: chassis,
-            assignmentId: record.machineAssignmentId ?? chassis,
-            latitude: record.checkInLat ?? 0.0,
-            longitude: record.checkInLng ?? 0.0,
-            accuracy: record.checkInAccuracy ?? 10.0,
-            locationSource: record.locationSource ?? 'GPS',
-            photoBytes: photoBytes,
-          );
-        } else if (targetUserIdStr.isNotEmpty &&
-            (targetUserIdStr != currentUserId || record.markedForUserId != null)) {
-          synced = await apiService.checkInTeamMember(
-            targetUserId: targetUserIdStr,
-            latitude: record.checkInLat ?? 0.0,
-            longitude: record.checkInLng ?? 0.0,
-            accuracy: record.checkInAccuracy ?? 10.0,
-            locationSource: record.locationSource ?? 'GPS',
-            photoBytes: photoBytes,
-          );
-        } else if (record.isCheckedOut && record.checkOutTime != null) {
-          synced = await apiService.checkOut(
-            attendanceId: record.id,
-            latitude: record.checkOutLat ?? record.checkInLat ?? 0.0,
-            longitude: record.checkOutLng ?? record.checkInLng ?? 0.0,
-            accuracy: record.checkOutAccuracy ?? record.checkInAccuracy ?? 10.0,
-            locationSource: record.locationSource ?? 'GPS',
-            photoBytes: photoBytes,
-          );
-        } else {
-          synced = await apiService.checkIn(
-            latitude: record.checkInLat ?? 0.0,
-            longitude: record.checkInLng ?? 0.0,
-            accuracy: record.checkInAccuracy ?? 10.0,
-            locationSource: record.locationSource ?? 'GPS',
-            photoBytes: photoBytes,
-          );
-        }
-
-        final updated = synced.copyWith(isSynced: true);
-        await localFallback.storageService.saveRecord(updated);
-        return 1;
-      } catch (e) {
-        if (kDebugMode) {
-          print('[ApiAttendanceRepository] Auto-sync error for attendance ${record.id}: $e');
-        }
-        return 0;
-      }
-    }));
+      }),
+    );
 
     int totalSynced = 0;
     for (final res in results) {

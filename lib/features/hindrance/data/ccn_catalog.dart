@@ -16,14 +16,3 @@ const ccnSubtypes = <String, List<String>>{
     'Road Expansion',
   ],
 };
-
-const ccnQuantityColumns = <String>[
-  'Block',
-  'Ring',
-  'Seg',
-  'SLOC',
-  'ELOC',
-  'GP',
-  'EM',
-  'DIV',
-];

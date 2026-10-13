@@ -12,22 +12,22 @@ class TaskApiService {
   final ApiClient apiClient;
 
   TaskApiService({ApiClient? apiClient})
-    : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.devApiBaseUrl);
+    : apiClient = apiClient ?? ApiClient(baseUrl: AppConstants.ilyncApiBaseUrl);
 
   /// Task reads use the token issued by the same task-service environment.
   /// Data sources can own separate ApiClient instances, so never depend on
   /// another API request having run first.
   void _useTaskServiceToken() {
     final storage = AuthStorageService();
-    final isDev = apiClient.baseUrl == AppConstants.devApiBaseUrl;
-    final taskToken = isDev
-        ? storage.devTaskAccessToken
-        : storage.uatTaskAccessToken;
+    final isUat = !AppConstants.ilyncIsDev;
+    final taskToken = isUat
+        ? storage.uatTaskAccessToken
+        : storage.devTaskAccessToken;
     if (taskToken == null || taskToken.isEmpty) {
       throw StateError(
-        isDev
-            ? 'Sign in again to establish Dev task access.'
-            : 'Sign in again to establish UAT task access.',
+        isUat
+            ? 'Sign in again to establish UAT task access.'
+            : 'Sign in again to establish Dev task access.',
       );
     }
     apiClient.setAuthToken(taskToken);

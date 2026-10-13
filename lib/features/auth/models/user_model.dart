@@ -52,10 +52,14 @@ class UserModel {
 
   String? get vendorId {
     if (vendor is Map) {
-      return (vendor['id'] ?? vendor['vendorId'] ?? vendor['vendor_id'])?.toString();
+      return (vendor['id'] ?? vendor['vendorId'] ?? vendor['vendor_id'])
+          ?.toString();
     }
     if (vendorDetails != null) {
-      return (vendorDetails!['id'] ?? vendorDetails!['vendorId'] ?? vendorDetails!['vendor_id'])?.toString();
+      return (vendorDetails!['id'] ??
+              vendorDetails!['vendorId'] ??
+              vendorDetails!['vendor_id'])
+          ?.toString();
     }
     if (vendor != null && vendor is! Map) {
       return vendor.toString();
@@ -77,7 +81,8 @@ class UserModel {
     }
 
     // 3. Vendor Name if available
-    final v = vendorName ??
+    final v =
+        vendorName ??
         (vendorDetails != null ? vendorDetails!['name']?.toString() : null) ??
         (vendors.isNotEmpty ? vendors.first['name']?.toString() : null);
 
@@ -92,17 +97,27 @@ class UserModel {
     }
 
     // 5. Fallback to vendor name or non-empty string
-    if (v != null && v.trim().isNotEmpty && v != 'Unassigned Vendor') return v.trim();
-    if (cleanName.isNotEmpty && cleanName != 'Employee' && cleanName != 'User') return cleanName;
+    if (v != null && v.trim().isNotEmpty && v != 'Unassigned Vendor') {
+      return v.trim();
+    }
+    if (cleanName.isNotEmpty &&
+        cleanName != 'Employee' &&
+        cleanName != 'User') {
+      return cleanName;
+    }
 
     return 'HERO User';
   }
 
   String get fullName => displayName;
 
-  String get displayEmployeeId => (employeeId != null && employeeId!.isNotEmpty) ? employeeId! : username;
+  String get displayEmployeeId =>
+      (employeeId != null && employeeId!.isNotEmpty) ? employeeId! : username;
 
-  String get displayVendor => vendorName ?? (vendorDetails != null ? vendorDetails!['name']?.toString() : null) ?? 'Unassigned Vendor';
+  String get displayVendor =>
+      vendorName ??
+      (vendorDetails != null ? vendorDetails!['name']?.toString() : null) ??
+      'Unassigned Vendor';
 
   String get initials {
     final clean = displayName.trim();
@@ -153,7 +168,20 @@ class UserModel {
 
   // Role Checks
   bool get isAdmin =>
-      role.toUpperCase() == 'ADMIN' || roles.contains('ADMIN');
+      _normalizedRole(role) == 'ADMIN' ||
+      _normalizedRole(role) == 'FLEET_ADMIN' ||
+      _normalizedRole(role) == 'FLEETADMIN' ||
+      _normalizedRole(role) == 'SUPERUSER' ||
+      roles.any((value) {
+        final normalized = _normalizedRole(value);
+        return normalized == 'ADMIN' ||
+            normalized == 'FLEET_ADMIN' ||
+            normalized == 'FLEETADMIN' ||
+            normalized == 'SUPERUSER';
+      });
+
+  static String _normalizedRole(String value) =>
+      value.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_');
   bool get isProjectManager =>
       role.toUpperCase() == 'PROJECT_MANAGER' ||
       roles.contains('PROJECT_MANAGER');
@@ -169,29 +197,62 @@ class UserModel {
       vendorDetails != null;
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
-    final rawId = json['id'] ?? json['pk'] ?? json['user_id'] ?? json['userId'] ?? '';
-    final extId = json['external_user_id'] ?? json['externalUserId'] ?? json['external_id']?.toString();
+    final rawId =
+        json['id'] ?? json['pk'] ?? json['user_id'] ?? json['userId'] ?? '';
+    final extId =
+        json['external_user_id'] ??
+        json['externalUserId'] ??
+        json['external_id']?.toString();
     final rawFirst = json['first_name'] ?? json['firstName'] ?? '';
     final rawLast = json['last_name'] ?? json['lastName'] ?? '';
-    final rawName = json['user_name'] ?? json['name'] ?? '$rawFirst $rawLast'.trim();
+    final rawName =
+        json['user_name'] ?? json['name'] ?? '$rawFirst $rawLast'.trim();
     final rawUsername =
-        json['username'] ?? json['email']?.toString().split('@').first ?? (rawName.toString().isNotEmpty ? rawName.toString() : 'user');
+        json['username'] ??
+        json['email']?.toString().split('@').first ??
+        (rawName.toString().isNotEmpty ? rawName.toString() : 'user');
     final rawEmail = json['email'] ?? '';
-    final rawRole = json['role'] ?? json['user_type'] ?? 'OPERATOR';
+    String readCode(dynamic value) {
+      if (value is Map) {
+        return (value['code'] ??
+                value['slug'] ??
+                value['key'] ??
+                value['name'] ??
+                value['role'] ??
+                value['value'] ??
+                '')
+            .toString();
+      }
+      return value?.toString() ?? '';
+    }
 
-    final rolesList = (json['roles'] is List)
-        ? (json['roles'] as List<dynamic>).map((e) => e.toString()).toList()
-        : [rawRole.toString()];
+    List<String> readStringList(dynamic value) {
+      if (value is! List) return const [];
+      return value
+          .map(readCode)
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+    }
 
-    final permissionsList = (json['permissions'] is List)
-        ? (json['permissions'] as List<dynamic>).map((e) => e.toString()).toList()
-        : <String>[];
+    final rawRole = readCode(
+      json['role'] ?? json['user_type'] ?? json['role_name'] ?? 'OPERATOR',
+    );
+
+    final rolesList = [...readStringList(json['roles'])];
+    if (rolesList.isEmpty && rawRole.isNotEmpty) rolesList.add(rawRole);
+
+    final permissionsList = readStringList(
+      json['permissions'] ??
+          json['permission_codes'] ??
+          json['user_permissions'],
+    ).map((permission) => permission.toLowerCase()).toList();
 
     final vendorsList = (json['vendors'] is List)
         ? (json['vendors'] as List<dynamic>)
-            .whereType<Map<dynamic, dynamic>>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+              .whereType<Map<dynamic, dynamic>>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
         : <Map<String, dynamic>>[];
 
     Map<String, dynamic>? vDetails;
@@ -199,12 +260,19 @@ class UserModel {
       vDetails = Map<String, dynamic>.from(json['vendor_details'] as Map);
     }
 
-    final vendorObj = json['vendor'] is Map<String, dynamic> ? json['vendor'] as Map<String, dynamic> : null;
-    final vendorStr = json['vendor'] is String ? json['vendor'] as String : null;
+    final vendorObj = json['vendor'] is Map<String, dynamic>
+        ? json['vendor'] as Map<String, dynamic>
+        : null;
+    final vendorStr = json['vendor'] is String
+        ? json['vendor'] as String
+        : null;
 
-    final vName = json['vendor_name']?.toString() ??
+    final vName =
+        json['vendor_name']?.toString() ??
         (vendorObj != null ? vendorObj['name']?.toString() : null) ??
-        (vendorStr != null && vendorStr.trim().isNotEmpty ? vendorStr.trim() : null) ??
+        (vendorStr != null && vendorStr.trim().isNotEmpty
+            ? vendorStr.trim()
+            : null) ??
         (vDetails != null ? vDetails['name']?.toString() : null) ??
         (vendorsList.isNotEmpty ? vendorsList.first['name']?.toString() : null);
 
@@ -212,11 +280,13 @@ class UserModel {
         ? json['reporting_manager'] as Map<String, dynamic>
         : null;
 
-    final managerId = json['reporting_manager_id']?.toString() ??
+    final managerId =
+        json['reporting_manager_id']?.toString() ??
         json['reportingManagerId']?.toString() ??
         managerObj?['id']?.toString();
 
-    final managerName = json['reporting_manager_name']?.toString() ??
+    final managerName =
+        json['reporting_manager_name']?.toString() ??
         json['reportingManagerName']?.toString() ??
         managerObj?['name']?.toString() ??
         managerObj?['username']?.toString();
@@ -228,7 +298,8 @@ class UserModel {
       parsedJoined = DateTime.tryParse(json['createdAt'].toString());
     }
 
-    final rawMachine = json['machine']?.toString() ??
+    final rawMachine =
+        json['machine']?.toString() ??
         json['machine_chassis_no']?.toString() ??
         json['machine_id']?.toString() ??
         json['machineChassis']?.toString();
@@ -241,45 +312,51 @@ class UserModel {
       firstName: rawFirst.toString(),
       lastName: rawLast.toString(),
       name: rawName.toString(),
-      role: rawRole.toString(),
+      role: rawRole,
       roles: rolesList,
       permissions: permissionsList,
       vendor: json['vendor'],
       vendors: vendorsList,
       vendorDetails: vDetails,
       vendorName: vName,
-      phoneNumber: json['phone_number']?.toString() ?? json['phone']?.toString(),
-      employeeId: json['employee_id']?.toString() ?? json['employeeId']?.toString(),
+      phoneNumber:
+          json['phone_number']?.toString() ?? json['phone']?.toString(),
+      employeeId:
+          json['employee_id']?.toString() ?? json['employeeId']?.toString(),
       reportingManagerId: managerId,
       reportingManagerName: managerName,
       isActive: json['is_active'] as bool? ?? json['isActive'] as bool? ?? true,
       avatar: json['avatar']?.toString(),
       dateJoined: parsedJoined,
-      machineChassis: (rawMachine != null && rawMachine.isNotEmpty && rawMachine != 'null') ? rawMachine : null,
+      machineChassis:
+          (rawMachine != null && rawMachine.isNotEmpty && rawMachine != 'null')
+          ? rawMachine
+          : null,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        if (externalUserId != null) 'external_user_id': externalUserId,
-        'username': username,
-        'email': email,
-        'first_name': firstName,
-        'last_name': lastName,
-        'name': name,
-        'role': role,
-        'roles': roles,
-        'permissions': permissions,
-        if (vendor != null) 'vendor': vendor,
-        'vendors': vendors,
-        'vendor_details': vendorDetails,
-        if (vendorName != null) 'vendor_name': vendorName,
-        'phone_number': phoneNumber,
-        'employee_id': employeeId,
-        if (reportingManagerId != null) 'reporting_manager_id': reportingManagerId,
-        if (reportingManagerName != null) 'reporting_manager_name': reportingManagerName,
-        'is_active': isActive,
-        'avatar': avatar,
-        if (dateJoined != null) 'date_joined': dateJoined!.toIso8601String(),
-      };
+    'id': id,
+    if (externalUserId != null) 'external_user_id': externalUserId,
+    'username': username,
+    'email': email,
+    'first_name': firstName,
+    'last_name': lastName,
+    'name': name,
+    'role': role,
+    'roles': roles,
+    'permissions': permissions,
+    if (vendor != null) 'vendor': vendor,
+    'vendors': vendors,
+    'vendor_details': vendorDetails,
+    if (vendorName != null) 'vendor_name': vendorName,
+    'phone_number': phoneNumber,
+    'employee_id': employeeId,
+    if (reportingManagerId != null) 'reporting_manager_id': reportingManagerId,
+    if (reportingManagerName != null)
+      'reporting_manager_name': reportingManagerName,
+    'is_active': isActive,
+    'avatar': avatar,
+    if (dateJoined != null) 'date_joined': dateJoined!.toIso8601String(),
+  };
 }

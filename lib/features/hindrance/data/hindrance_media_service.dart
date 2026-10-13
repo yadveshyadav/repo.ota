@@ -1,10 +1,10 @@
 import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:geolocator/geolocator.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
 import 'hindrance_local_store.dart';
@@ -41,6 +41,9 @@ class HindranceMediaService {
 
   final ImagePicker _picker;
   static const _uuid = Uuid();
+  static const _evidenceChannel = MethodChannel(
+    'com.infocrats.hero/evidence_export',
+  );
 
   Future<CapturedLocation> getFreshLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -77,6 +80,8 @@ class HindranceMediaService {
     required String ownerId,
     required String reportId,
     required String slot,
+    String recordType = 'HINDRANCE',
+    DateTime? createdAt,
   }) async {
     final picked = await _picker.pickImage(
       source: ImageSource.camera,
@@ -145,7 +150,17 @@ class HindranceMediaService {
       await output.writeAsBytes(outputBytes, flush: true);
       path = output.path;
     }
-    return _mediaRecord(
+    final publicCopy = kIsWeb
+        ? null
+        : await _exportFile(
+            sourcePath: path,
+            filename: filename,
+            mimeType: 'image/jpeg',
+            recordType: recordType,
+            reportId: reportId,
+            createdAt: createdAt,
+          );
+    final record = _mediaRecord(
       mediaId: mediaId,
       ownerId: ownerId,
       reportId: reportId,
@@ -155,6 +170,10 @@ class HindranceMediaService {
       location: photoLocation,
       storage: kIsWeb ? 'indexeddb' : 'file',
     );
+    record['filename'] = filename;
+    record['sizeBytes'] = outputBytes.length;
+    if (publicCopy != null) record.addAll(publicCopy);
+    return record;
   }
 
   Future<Map<String, dynamic>?> captureVideo({
@@ -162,6 +181,8 @@ class HindranceMediaService {
     required String reportId,
     required String slot,
     required Duration maxDuration,
+    String recordType = 'HINDRANCE',
+    DateTime? createdAt,
   }) async {
     final location = await getFreshLocation();
     final picked = await _picker.pickVideo(
@@ -208,6 +229,16 @@ class HindranceMediaService {
       await File(picked.path).copy(output.path);
       path = output.path;
     }
+    final publicCopy = kIsWeb
+        ? null
+        : await _exportFile(
+            sourcePath: path,
+            filename: filename,
+            mimeType: extension == '.webm' ? 'video/webm' : 'video/mp4',
+            recordType: recordType,
+            reportId: reportId,
+            createdAt: createdAt,
+          );
     final record = _mediaRecord(
       mediaId: mediaId,
       ownerId: ownerId,
@@ -223,6 +254,8 @@ class HindranceMediaService {
     if (recordedDuration != null) {
       record['durationSeconds'] = recordedDuration.inSeconds;
     }
+    record['sizeBytes'] = kIsWeb ? webBytes!.length : await File(path).length();
+    if (publicCopy != null) record.addAll(publicCopy);
     return record;
   }
 
@@ -234,6 +267,8 @@ class HindranceMediaService {
     required String slot,
     required Duration duration,
     required Duration maxDuration,
+    String recordType = 'CCN',
+    DateTime? createdAt,
   }) async {
     if (duration > maxDuration) {
       throw Exception(
@@ -271,6 +306,16 @@ class HindranceMediaService {
       await File(picked.path).copy(output.path);
       path = output.path;
     }
+    final publicCopy = kIsWeb
+        ? null
+        : await _exportFile(
+            sourcePath: path,
+            filename: filename,
+            mimeType: extension == '.webm' ? 'video/webm' : 'video/mp4',
+            recordType: recordType,
+            reportId: reportId,
+            createdAt: createdAt,
+          );
     final record = _mediaRecord(
       mediaId: mediaId,
       ownerId: ownerId,
@@ -285,6 +330,8 @@ class HindranceMediaService {
     );
     record['filename'] = filename;
     record['durationSeconds'] = duration.inSeconds;
+    record['sizeBytes'] = bytes?.length ?? await File(path).length();
+    if (publicCopy != null) record.addAll(publicCopy);
     return record;
   }
 
@@ -294,6 +341,8 @@ class HindranceMediaService {
     required String filename,
     required String kind,
     required Uint8List bytes,
+    String recordType = 'CCN',
+    DateTime? createdAt,
   }) async {
     final mediaId = _uuid.v4();
     await HindranceLocalStore.instance.saveMediaBytes(
@@ -303,7 +352,7 @@ class HindranceMediaService {
       filename: filename,
       bytes: bytes,
     );
-    return {
+    final record = <String, dynamic>{
       'mediaId': mediaId,
       'ownerId': ownerId,
       'reportId': reportId,
@@ -314,6 +363,117 @@ class HindranceMediaService {
       'storage': kIsWeb ? 'indexeddb' : 'database',
       'syncState': 'LOCAL_SAVED',
     };
+    final extension = filename.contains('.')
+        ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase()
+        : '';
+    final mimeType = switch (extension) {
+      'kml' => 'application/vnd.google-earth.kml+xml',
+      'shp' => 'application/octet-stream',
+      _ => 'application/octet-stream',
+    };
+    final publicCopy = await _exportBytes(
+      bytes: bytes,
+      filename: filename,
+      mimeType: mimeType,
+      recordType: recordType,
+      reportId: reportId,
+      createdAt: createdAt,
+    );
+    if (publicCopy != null) record.addAll(publicCopy);
+    return record;
+  }
+
+  Future<Map<String, dynamic>?> _exportFile({
+    required String sourcePath,
+    required String filename,
+    required String mimeType,
+    required String recordType,
+    required String reportId,
+    DateTime? createdAt,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    final relativePath = _publicRelativePath(recordType, reportId, createdAt);
+    try {
+      final result = await _evidenceChannel
+          .invokeMapMethod<String, dynamic>('exportFile', {
+            'sourcePath': sourcePath,
+            'relativePath': relativePath,
+            'fileName': filename,
+            'mimeType': mimeType,
+          });
+      return {
+        'fileManagerUri': result?['uri'],
+        'fileManagerFolder': 'Download/$relativePath',
+      };
+    } catch (error) {
+      return {
+        'fileManagerFolder': 'Download/$relativePath',
+        'fileManagerExportError': error.toString(),
+      };
+    }
+  }
+
+  Future<Map<String, dynamic>?> _exportBytes({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+    required String recordType,
+    required String reportId,
+    DateTime? createdAt,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+    final relativePath = _publicRelativePath(recordType, reportId, createdAt);
+    try {
+      final result = await _evidenceChannel
+          .invokeMapMethod<String, dynamic>('exportBytes', {
+            'bytes': bytes,
+            'relativePath': relativePath,
+            'fileName': filename,
+            'mimeType': mimeType,
+          });
+      return {
+        'fileManagerUri': result?['uri'],
+        'fileManagerFolder': 'Download/$relativePath',
+      };
+    } catch (error) {
+      return {
+        'fileManagerFolder': 'Download/$relativePath',
+        'fileManagerExportError': error.toString(),
+      };
+    }
+  }
+
+  String _publicRelativePath(
+    String recordType,
+    String reportId,
+    DateTime? createdAt,
+  ) {
+    final safeType = switch (recordType.trim().toUpperCase()) {
+      'CCN' => 'CCN',
+      'OTN' => 'OTN',
+      _ => 'Hindrance',
+    };
+    final date = (createdAt ?? DateTime.now()).toLocal();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    final timeFolder =
+        '${date.year}${twoDigits(date.month)}${twoDigits(date.day)}_${twoDigits(date.hour)}${twoDigits(date.minute)}${twoDigits(date.second)}';
+    final cleanId = reportId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+    final safeId = cleanId.substring(
+      0,
+      cleanId.length < 8 ? cleanId.length : 8,
+    );
+    return 'HERO APP/$safeType/${timeFolder}_${safeId.isEmpty ? 'report' : safeId}';
+  }
+
+  Future<void> deleteFileManagerCopy(Map<dynamic, dynamic> record) async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    final uri = record['fileManagerUri']?.toString();
+    if (uri == null || uri.isEmpty) return;
+    try {
+      await _evidenceChannel.invokeMethod<bool>('deleteExport', {'uri': uri});
+    } catch (_) {
+      // App-private deletion must still proceed if public deletion is denied.
+    }
   }
 
   Future<File> storePickedFile({

@@ -19,6 +19,7 @@ class AuthStorageService {
   static const String _keyUserJson = 'hero_user_json';
   static const String _keyLastActiveAt = 'hero_last_active_at';
   static const String _keyIsLoggedIn = 'hero_is_logged_in';
+  static const String _keyAuthBaseUrl = 'hero_auth_base_url';
 
   /// Maximum allowed inactivity duration before auto-logout (10 consecutive days)
   static const Duration maxInactivityDuration = Duration(days: 10);
@@ -27,6 +28,7 @@ class AuthStorageService {
   String? _uatTaskAccessToken;
   String? _devTaskAccessToken;
   String? _refreshToken;
+  String? _authBaseUrl;
   UserModel? _currentUser;
   DateTime? _lastActiveAt;
   bool _isLoggedIn = false;
@@ -36,6 +38,7 @@ class AuthStorageService {
   String? get uatTaskAccessToken => _uatTaskAccessToken;
   String? get devTaskAccessToken => _devTaskAccessToken;
   String? get refreshToken => _refreshToken;
+  String? get authBaseUrl => _authBaseUrl;
   UserModel? get currentUser => _currentUser;
   DateTime? get lastActiveAt => _lastActiveAt;
 
@@ -69,6 +72,7 @@ class AuthStorageService {
       _uatTaskAccessToken = prefs.getString(_keyUatTaskAccessToken);
       _devTaskAccessToken = prefs.getString(_keyDevTaskAccessToken);
       final savedRefreshToken = prefs.getString(_keyRefreshToken);
+      _authBaseUrl = prefs.getString(_keyAuthBaseUrl);
       final savedUserJson = prefs.getString(_keyUserJson);
       final savedLastActiveStr = prefs.getString(_keyLastActiveAt);
 
@@ -134,11 +138,16 @@ class AuthStorageService {
   }
 
   /// Save active session details upon successful authentication
-  Future<void> saveSession({required AuthToken token, UserModel? user}) async {
+  Future<void> saveSession({
+    required AuthToken token,
+    UserModel? user,
+    String? authBaseUrl,
+  }) async {
     final now = DateTime.now();
 
     _accessToken = token.accessToken;
     _refreshToken = token.refreshToken;
+    _authBaseUrl = authBaseUrl;
     _currentUser =
         user ??
         const UserModel(id: '1', username: 'admin', email: 'admin@hero.com');
@@ -149,6 +158,11 @@ class AuthStorageService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_keyAccessToken, token.accessToken);
       await prefs.setString(_keyRefreshToken, token.refreshToken ?? '');
+      if (_authBaseUrl != null && _authBaseUrl!.isNotEmpty) {
+        await prefs.setString(_keyAuthBaseUrl, _authBaseUrl!);
+      } else {
+        await prefs.remove(_keyAuthBaseUrl);
+      }
       await prefs.setString(_keyUserJson, jsonEncode(_currentUser!.toJson()));
       await prefs.setString(_keyLastActiveAt, now.toIso8601String());
       await prefs.setBool(_keyIsLoggedIn, true);
@@ -205,6 +219,7 @@ class AuthStorageService {
     _uatTaskAccessToken = null;
     _devTaskAccessToken = null;
     _refreshToken = null;
+    _authBaseUrl = null;
     _currentUser = null;
     _lastActiveAt = null;
     _isLoggedIn = false;
@@ -218,6 +233,7 @@ class AuthStorageService {
       await prefs.remove(_keyUatTaskAccessToken);
       await prefs.remove(_keyDevTaskAccessToken);
       await prefs.remove(_keyRefreshToken);
+      await prefs.remove(_keyAuthBaseUrl);
       await prefs.remove(_keyUserJson);
       await prefs.remove(_keyLastActiveAt);
       await prefs.remove(_keyIsLoggedIn);

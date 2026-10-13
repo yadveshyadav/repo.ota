@@ -31,6 +31,21 @@ android {
         versionName = flutter.versionName
     }
 
+    // Dev and UAT variants can be installed side by side. UAT preserves the
+    // existing package ID; Dev gets a suffix to avoid replacing that app.
+    flavorDimensions += "environment"
+    productFlavors {
+        create("dev") {
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appLabel"] = "HERO APP Dev"
+        }
+        create("uat") {
+            dimension = "environment"
+            manifestPlaceholders["appLabel"] = "HERO APP UAT"
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (keystorePropertiesFile.exists()) {

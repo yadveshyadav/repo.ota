@@ -5,28 +5,39 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:hero_app/core/constants/app_constants.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 import 'package:hero_app/features/auth/services/auth_storage_service.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_local_store.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_classification.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_media_service.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_submission_service.dart';
+import 'package:hero_app/features/hindrance/data/pending_sync_manager.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_task_data_source.dart';
 import 'package:hero_app/features/hindrance/screens/ccn_workflow_screen.dart';
 import 'package:hero_app/features/hindrance/widgets/hindrance_glass_surface.dart';
+import 'package:hero_app/features/hindrance/widgets/pending_sync_action.dart';
 import 'package:hero_app/models/task_model.dart';
 import 'package:hero_app/models/task_filter.dart';
 import 'package:hero_app/services/api/task_api_service.dart';
 import 'package:uuid/uuid.dart';
 
 class HindranceScreen extends StatefulWidget {
-  const HindranceScreen({super.key});
+  const HindranceScreen({super.key, this.workflowType = 'HINDRANCE'});
+
+  /// OTN shares the location hierarchy and evidence capture UI. Its API is
+  /// intentionally not routed through the Hindrance submit contract.
+  final String workflowType;
 
   @override
   State<HindranceScreen> createState() => _HindranceScreenState();
 }
 
-class _HindranceScreenState extends State<HindranceScreen> {
+class _HindranceScreenState extends State<HindranceScreen>
+    with WidgetsBindingObserver {
+  bool get _isOtn => widget.workflowType.trim().toUpperCase() == 'OTN';
+  String get _recordType => _isOtn ? 'OTN' : 'HINDRANCE';
+  String get _workflowLabel => _isOtn ? 'OTN' : 'Hindrance';
   static const _uuid = Uuid();
   final _store = HindranceLocalStore.instance;
   final _taskSource = HindranceTaskDataSource();
@@ -34,6 +45,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
   final _taskApi = TaskApiService();
   final _mediaService = HindranceMediaService();
   final _descriptionController = TextEditingController();
+  final _otnReasonController = TextEditingController();
+  final _otnSubtype1Controller = TextEditingController();
+  final _otnSubtype2Controller = TextEditingController();
   String? _hindranceType;
   String? _subHindranceType;
   final _ieNameController = TextEditingController();
@@ -42,6 +56,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
   String? _ownerId;
   String? _error;
   bool _loading = true;
+  bool _didAutoResumeDraft = false;
   bool _loadingServerHindrances = false;
   bool _serverHindranceLoadFailed = false;
   bool _serverHindrancesHaveMore = false;
@@ -51,6 +66,14 @@ class _HindranceScreenState extends State<HindranceScreen> {
   bool _taskPackSaved = false;
   bool _taskListHasMore = false;
   bool _loadingHierarchy = false;
+  String? _hierarchyLoadError;
+  bool _loadingBoqApprovals = false;
+  String? _boqApprovalLoadError;
+  final Set<String> _approvedBoqBlockIds = {};
+  final Set<String> _boqCheckedBlockIds = {};
+  int _boqApprovalRequest = 0;
+  int _boqApprovalChecked = 0;
+  int _boqApprovalTotal = 0;
   bool _loadingMoreTasks = false;
   int _nextTaskPage = 1;
   bool _fromCache = false;
@@ -68,23 +91,36 @@ class _HindranceScreenState extends State<HindranceScreen> {
   String? _circle;
   String? _district;
   String? _ringId;
+  String? _routeGroupKey;
   final Set<String> _segmentCodes = {};
   String _workflowStage = 'hindrance_form';
   bool? _ccnRequired;
   String? _ccnId;
   String? _serverTaskId;
+  Timer? _syncRecoveryTimer;
+  bool _checkingSyncRecovery = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _descriptionController.addListener(_queueAutosave);
+    _otnReasonController.addListener(_queueAutosave);
+    _otnSubtype1Controller.addListener(_queueAutosave);
+    _otnSubtype2Controller.addListener(_queueAutosave);
     _ieNameController.addListener(_queueAutosave);
     _iePhoneController.addListener(_queueAutosave);
     _load();
+    _syncRecoveryTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_retrySafelyResumableReports()),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _syncRecoveryTimer?.cancel();
     _descriptionController
       ..removeListener(_queueAutosave)
       ..dispose();
@@ -94,10 +130,25 @@ class _HindranceScreenState extends State<HindranceScreen> {
     _iePhoneController
       ..removeListener(_queueAutosave)
       ..dispose();
+    _otnReasonController.dispose();
+    _otnSubtype1Controller.dispose();
+    _otnSubtype2Controller.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_retrySafelyResumableReports());
+    }
+  }
+
   Future<void> _load({bool forceRefresh = false}) async {
+    if (forceRefresh) {
+      ++_boqApprovalRequest;
+      _boqCheckedBlockIds.clear();
+      _approvedBoqBlockIds.clear();
+    }
     final user = AuthStorageService().currentUser;
     if (user == null || user.id.trim().isEmpty) {
       setState(() {
@@ -115,10 +166,12 @@ class _HindranceScreenState extends State<HindranceScreen> {
     }
     try {
       final cachedReports = await _store.loadReports(user.id);
+      PendingSyncManager.instance.restore(cachedReports);
       final taskData = await _taskSource.load(
         user.id,
         forceRefresh: forceRefresh,
       );
+      unawaited(_restoreHindranceSyncRunners(cachedReports, taskData.tasks));
       if (!mounted) return;
       setState(() {
         _cachedTasks = taskData.fromCache ? taskData.tasks : const [];
@@ -128,10 +181,15 @@ class _HindranceScreenState extends State<HindranceScreen> {
         _taskListHasMore = taskData.hasMore;
         _nextTaskPage = taskData.nextPage;
         _savedReports = cachedReports
-            .where((report) => report['recordType'] != 'CCN')
+            .where(
+              (report) =>
+                  report['recordType']?.toString().toUpperCase() == _recordType,
+            )
             .toList();
         _loading = false;
       });
+      _autoResumeSavedDraft();
+      unawaited(_preloadBoqApprovals());
       unawaited(_loadServerHindranceTasks());
     } catch (e) {
       if (!mounted) return;
@@ -140,6 +198,19 @@ class _HindranceScreenState extends State<HindranceScreen> {
         _error = 'Could not load local Hindrance data: $e';
       });
     }
+  }
+
+  void _autoResumeSavedDraft() {
+    if (_didAutoResumeDraft) return;
+    _didAutoResumeDraft = true;
+    final saved = _savedReports.where((report) {
+      final state = report['queueState']?.toString().toUpperCase();
+      final reportId = report['reportId']?.toString() ?? '';
+      return const {'LOCAL_SAVED', 'PARTIALLY_SAVED'}.contains(state) &&
+          reportId.isNotEmpty &&
+          !PendingSyncManager.instance.isActive(reportId);
+    }).firstOrNull;
+    if (saved != null) unawaited(_resumeDraft(saved));
   }
 
   Future<void> _loadServerHindranceTasks({
@@ -155,10 +226,10 @@ class _HindranceScreenState extends State<HindranceScreen> {
       final response = await _taskApi.fetchTasks(
         page: page,
         size: 100,
-        filters: const TaskFilterModel(taskType: 'HINDRANCE'),
+        filters: TaskFilterModel(taskType: _recordType),
       );
       final hindrances = response.tasks
-          .where((task) => task.taskType.toUpperCase().contains('HINDRANCE'))
+          .where((task) => task.taskType.toUpperCase().contains(_recordType))
           .toList();
       if (!mounted) return;
       setState(() {
@@ -209,6 +280,12 @@ class _HindranceScreenState extends State<HindranceScreen> {
           .toList()
         ..sort());
 
+  List<TaskModel> get _boqEligibleBlocks => _circle == null
+      ? _blocks
+      : _blocks
+            .where((block) => _approvedBoqBlockIds.contains(block.id))
+            .toList();
+
   List<String> get _districts =>
       (_blocks
           .where((block) => _circle == null || block.circle == _circle)
@@ -218,20 +295,109 @@ class _HindranceScreenState extends State<HindranceScreen> {
           .toList()
         ..sort());
 
-  List<TaskModel> get _visibleBlocks => _blocks
+  List<TaskModel> get _visibleBlocks => _boqEligibleBlocks
       .where((block) => _circle == null || block.circle == _circle)
       .where((block) => _district == null || block.district == _district)
       .toList();
+
+  Future<void> _selectCircle(String? circle) async {
+    ++_boqApprovalRequest;
+    setState(() {
+      _circle = circle;
+      _district = null;
+      _blockId = null;
+      _ringId = null;
+      _routeGroupKey = null;
+      _segmentCodes.clear();
+      _boqApprovalLoadError = null;
+      _boqApprovalChecked = 0;
+      _boqApprovalTotal = 0;
+      _loadingBoqApprovals = false;
+      _queueAutosave();
+    });
+  }
+
+  Future<void> _preloadBoqApprovals() async {
+    final request = ++_boqApprovalRequest;
+    final candidates = _blocks
+        .where((block) => !_boqCheckedBlockIds.contains(block.id))
+        .toList();
+    setState(() {
+      _boqApprovalLoadError = null;
+      _boqApprovalChecked = _boqCheckedBlockIds.length;
+      _boqApprovalTotal = _blocks.length;
+      _loadingBoqApprovals = candidates.isNotEmpty;
+    });
+    if (candidates.isEmpty) {
+      if (mounted) setState(() => _loadingBoqApprovals = false);
+      return;
+    }
+    var nextIndex = 0;
+    var verificationFailed = false;
+    Future<void> worker() async {
+      while (true) {
+        if (!mounted || request != _boqApprovalRequest) return;
+        final index = nextIndex++;
+        if (index >= candidates.length) return;
+        final block = candidates[index];
+        try {
+          if (await _taskSource.hasUsableApprovedBoq(block)) {
+            _approvedBoqBlockIds.add(block.id);
+          }
+          _boqCheckedBlockIds.add(block.id);
+        } catch (error) {
+          final hasCachedApprovedBoq =
+              block.approvalStatus.toUpperCase() == 'APPROVED' &&
+              block.routeSnapshot?.routes.isNotEmpty == true;
+          if (hasCachedApprovedBoq) {
+            _approvedBoqBlockIds.add(block.id);
+            _boqCheckedBlockIds.add(block.id);
+          } else {
+            verificationFailed = true;
+            debugPrint(
+              '[HindranceScreen] Could not check BoQ approval for ${block.id}: $error',
+            );
+          }
+        } finally {
+          if (mounted && request == _boqApprovalRequest) {
+            setState(() => _boqApprovalChecked++);
+          }
+        }
+      }
+    }
+
+    await Future.wait(
+      List.generate(candidates.length.clamp(1, 10).toInt(), (_) => worker()),
+    );
+    if (!mounted || request != _boqApprovalRequest) return;
+    setState(() {
+      _loadingBoqApprovals = false;
+      _boqApprovalLoadError = verificationFailed
+          ? 'Some Block approvals could not be checked. Only Blocks confirmed with one approved BoQ are shown.'
+          : null;
+    });
+  }
 
   List<TaskModel> get _rings => HindranceTaskDataSource.ringsForBlock(
     _selectedBlock,
     _tasks,
   ).where((task) => _displayName(task).isNotEmpty).toList();
 
-  List<TaskSegmentModel> get _segments {
+  List<TaskSegmentModel> get _ringSegments {
     final ring = _selectedRing;
     if (ring == null) return const [];
     return _segmentsFor(ring);
+  }
+
+  List<HindranceRouteGroup> get _routeGroups =>
+      HindranceTaskDataSource.routeGroupsForSegments(_ringSegments);
+
+  List<TaskSegmentModel> get _segments {
+    final group = _routeGroups
+        .where((candidate) => candidate.key == _routeGroupKey)
+        .firstOrNull;
+    if (_routeGroups.isNotEmpty) return group?.segments ?? const [];
+    return _ringSegments;
   }
 
   List<TaskSegmentModel> _segmentsFor(TaskModel ring) {
@@ -258,6 +424,11 @@ class _HindranceScreenState extends State<HindranceScreen> {
                 targetLng:
                     _firstSegment(task)?.targetLng ??
                     task.routeSnapshot?.targetNode?.longitude,
+                groupStart: _firstSegment(task)?.groupStart,
+                groupEnd: _firstSegment(task)?.groupEnd,
+                groupStartId: _firstSegment(task)?.groupStartId,
+                groupEndId: _firstSegment(task)?.groupEndId,
+                sequenceNo: _firstSegment(task)?.sequenceNo,
               ),
             )
             .toList();
@@ -304,19 +475,17 @@ class _HindranceScreenState extends State<HindranceScreen> {
           initialValue: _circles.contains(_circle) ? _circle : null,
           decoration: const InputDecoration(labelText: 'Circle'),
           isExpanded: true,
+          hint: Text(
+            _loadingBoqApprovals
+                ? 'Loading approved Blocks…'
+                : 'Select a Circle',
+          ),
           items: _circles
               .map(
                 (value) => DropdownMenuItem(value: value, child: Text(value)),
               )
               .toList(),
-          onChanged: (value) => setState(() {
-            _circle = value;
-            _district = null;
-            _blockId = null;
-            _ringId = null;
-            _segmentCodes.clear();
-            _queueAutosave();
-          }),
+          onChanged: _loadingBoqApprovals ? null : _selectCircle,
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -324,18 +493,28 @@ class _HindranceScreenState extends State<HindranceScreen> {
           initialValue: _districts.contains(_district) ? _district : null,
           decoration: const InputDecoration(labelText: 'District'),
           isExpanded: true,
+          hint: Text(
+            _circle == null
+                ? 'Select a Circle first'
+                : _districts.isEmpty
+                ? 'No Districts available'
+                : 'Select a District',
+          ),
           items: _districts
               .map(
                 (value) => DropdownMenuItem(value: value, child: Text(value)),
               )
               .toList(),
-          onChanged: (value) => setState(() {
-            _district = value;
-            _blockId = null;
-            _ringId = null;
-            _segmentCodes.clear();
-            _queueAutosave();
-          }),
+          onChanged: _circle == null
+              ? null
+              : (value) => setState(() {
+                  _district = value;
+                  _blockId = null;
+                  _ringId = null;
+                  _routeGroupKey = null;
+                  _segmentCodes.clear();
+                  _queueAutosave();
+                }),
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -345,6 +524,17 @@ class _HindranceScreenState extends State<HindranceScreen> {
               : null,
           decoration: const InputDecoration(labelText: 'Block'),
           isExpanded: true,
+          hint: Text(
+            _loadingBoqApprovals
+                ? 'Checking approved BoQs…'
+                : _circle == null
+                ? 'Select a Circle first'
+                : _district == null
+                ? 'Select a District first'
+                : blocks.isEmpty
+                ? 'No approved BoQ Blocks'
+                : 'Select a Block',
+          ),
           items: blocks
               .map(
                 (block) => DropdownMenuItem(
@@ -356,10 +546,15 @@ class _HindranceScreenState extends State<HindranceScreen> {
                 ),
               )
               .toList(),
-          onChanged: (id) {
-            final block = blocks.where((item) => item.id == id).firstOrNull;
-            if (block != null) unawaited(_selectBlock(block));
-          },
+          onChanged:
+              _loadingBoqApprovals || _circle == null || _district == null
+              ? null
+              : (id) {
+                  final block = blocks
+                      .where((item) => item.id == id)
+                      .firstOrNull;
+                  if (block != null) unawaited(_selectBlock(block));
+                },
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
@@ -387,16 +582,46 @@ class _HindranceScreenState extends State<HindranceScreen> {
               ? null
               : (id) => setState(() {
                   _ringId = id;
+                  _routeGroupKey = null;
                   _segmentCodes.clear();
                   _queueAutosave();
                 }),
         ),
+        if (_routeGroups.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            key: ValueKey('hindrance-route-group-$_ringId-$_routeGroupKey'),
+            initialValue:
+                _routeGroups.any((group) => group.key == _routeGroupKey)
+                ? _routeGroupKey
+                : null,
+            decoration: const InputDecoration(labelText: 'Route'),
+            hint: const Text('Select a GP route'),
+            isExpanded: true,
+            items: _routeGroups
+                .map(
+                  (group) => DropdownMenuItem(
+                    value: group.key,
+                    child: Text(
+                      '${group.label} · ${group.segments.length} segments · ${group.segments.fold<double>(0, (sum, segment) => sum + segment.distanceKm).toStringAsFixed(2)} km',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (key) => setState(() {
+              _routeGroupKey = key;
+              _segmentCodes.clear();
+              _queueAutosave();
+            }),
+          ),
+        ],
         const SizedBox(height: 14),
         Row(
           children: [
             Expanded(
               child: Text(
-                'Segments (${selectedSegments.length} selected)',
+                'Segments (${selectedSegments.length} selected${_routeGroupKey == null ? '' : ' of ${segments.length}'})',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
@@ -421,8 +646,15 @@ class _HindranceScreenState extends State<HindranceScreen> {
         SizedBox(
           height: 240,
           child: segments.isEmpty
-              ? const Center(
-                  child: Text('Select a Block and Ring to view segments.'),
+              ? Center(
+                  child: Text(
+                    _selectedRing == null
+                        ? 'Select a Block and Ring to view routes.'
+                        : _routeGroups.isNotEmpty && _routeGroupKey == null
+                        ? 'Select a GP route to view its segments.'
+                        : 'No segments are available for this route.',
+                    textAlign: TextAlign.center,
+                  ),
                 )
               : DecoratedBox(
                   decoration: BoxDecoration(
@@ -439,35 +671,21 @@ class _HindranceScreenState extends State<HindranceScreen> {
                         final segment = segments[index - 2];
                         return CheckboxListTile(
                           dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
+                            horizontal: 4,
                             vertical: 2,
                           ),
                           value: _isSegmentSelected(segment),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '${segment.startNode} - ${segment.targetNode}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Color(0xFF17243A),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              const Text(
-                                'SEGMENT',
-                                style: TextStyle(
-                                  color: Color(0xFF9333EA),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
+                          title: Text(
+                            '${segment.startNode} - ${segment.targetNode}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF17243A),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                           subtitle: Padding(
                             padding: const EdgeInsets.only(top: 5),
@@ -658,31 +876,43 @@ class _HindranceScreenState extends State<HindranceScreen> {
     ),
   );
 
-  Widget _pickerNodePath(String start, String end) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF8FAFC),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: const Color(0xFFDCE3EC)),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _pickerNode(start),
-        const SizedBox(width: 5),
-        const Icon(
-          Icons.arrow_forward_rounded,
-          size: 14,
-          color: Color(0xFF94A3B8),
+  Widget _pickerNodePath(String start, String end) => LayoutBuilder(
+    builder: (context, constraints) {
+      final maxWidth = constraints.maxWidth.isFinite
+          ? constraints.maxWidth
+          : 260.0;
+      // Keep the node chips within the width left after the outer padding,
+      // border, arrow and spacing. A fixed minimum here made the path wider
+      // than its ListTile subtitle on narrow screens.
+      final nodeWidth = ((maxWidth - 40) / 2).clamp(0.0, 130.0);
+      return Container(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFDCE3EC)),
         ),
-        const SizedBox(width: 5),
-        _pickerNode(end),
-      ],
-    ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _pickerNode(start, maxWidth: nodeWidth),
+            const SizedBox(width: 5),
+            const Icon(
+              Icons.arrow_forward_rounded,
+              size: 14,
+              color: Color(0xFF94A3B8),
+            ),
+            const SizedBox(width: 5),
+            _pickerNode(end, maxWidth: nodeWidth),
+          ],
+        ),
+      );
+    },
   );
 
-  Widget _pickerNode(String value) => Container(
-    constraints: const BoxConstraints(maxWidth: 130),
+  Widget _pickerNode(String value, {double maxWidth = 130}) => Container(
+    constraints: BoxConstraints(maxWidth: maxWidth),
     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
     decoration: BoxDecoration(
       color: const Color(0xFFE9EEF5),
@@ -704,58 +934,77 @@ class _HindranceScreenState extends State<HindranceScreen> {
         suppliedTotal ??
         segments.fold<double>(0, (sum, segment) => sum + segment.distanceKm);
     final theme = Theme.of(context);
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowColor: WidgetStatePropertyAll(
-          theme.colorScheme.primaryContainer,
-        ),
-        columns: const [
-          DataColumn(label: Text('Start GP')),
-          DataColumn(label: Text('End GP')),
-          DataColumn(label: Text('Start Lat/Long')),
-          DataColumn(label: Text('End Lat/Long')),
-          DataColumn(label: Text('Segment Distance')),
-        ],
-        rows: [
-          for (final segment in segments)
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.7)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columnSpacing: 18,
+          horizontalMargin: 12,
+          headingRowHeight: 44,
+          dataRowMinHeight: 44,
+          dataRowMaxHeight: 56,
+          dividerThickness: 0.5,
+          headingRowColor: const WidgetStatePropertyAll(Color(0xFFF1F5F9)),
+          headingTextStyle: theme.textTheme.labelMedium?.copyWith(
+            color: const Color(0xFF334155),
+            fontWeight: FontWeight.w700,
+          ),
+          dataTextStyle: theme.textTheme.bodySmall?.copyWith(
+            color: const Color(0xFF1E293B),
+          ),
+          columns: const [
+            DataColumn(label: Text('Start GP')),
+            DataColumn(label: Text('End GP')),
+            DataColumn(label: Text('Start Lat/Long')),
+            DataColumn(label: Text('End Lat/Long')),
+            DataColumn(label: Text('Segment Distance')),
+          ],
+          rows: [
+            for (final segment in segments)
+              DataRow(
+                cells: [
+                  DataCell(
+                    Text(segment.startNode.isEmpty ? '—' : segment.startNode),
+                  ),
+                  DataCell(
+                    Text(segment.targetNode.isEmpty ? '—' : segment.targetNode),
+                  ),
+                  DataCell(
+                    Text(
+                      _formatCoordinates(segment.startLat, segment.startLng),
+                    ),
+                  ),
+                  DataCell(
+                    Text(
+                      _formatCoordinates(segment.targetLat, segment.targetLng),
+                    ),
+                  ),
+                  DataCell(Text('${segment.distanceKm.toStringAsFixed(2)} km')),
+                ],
+              ),
             DataRow(
+              color: const WidgetStatePropertyAll(Color(0xFFF8FAFC)),
               cells: [
-                DataCell(
-                  Text(segment.startNode.isEmpty ? '—' : segment.startNode),
-                ),
-                DataCell(
-                  Text(segment.targetNode.isEmpty ? '—' : segment.targetNode),
-                ),
-                DataCell(
-                  Text(_formatCoordinates(segment.startLat, segment.startLng)),
-                ),
+                const DataCell(Text('')),
+                const DataCell(Text('')),
+                const DataCell(Text('')),
+                const DataCell(Text('')),
                 DataCell(
                   Text(
-                    _formatCoordinates(segment.targetLat, segment.targetLng),
+                    'Total: ${totalDistance.toStringAsFixed(2)} km',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
-                DataCell(Text('${segment.distanceKm.toStringAsFixed(2)} km')),
               ],
             ),
-          DataRow(
-            color: WidgetStatePropertyAll(
-              theme.colorScheme.surfaceContainerHighest,
-            ),
-            cells: [
-              const DataCell(Text('')),
-              const DataCell(Text('')),
-              const DataCell(Text('')),
-              const DataCell(Text('')),
-              DataCell(
-                Text(
-                  'Total: ${totalDistance.toStringAsFixed(2)} km',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -824,7 +1073,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
 
   Map<String, dynamic> _payload() => {
     'reportId': _draft?['reportId'],
-    'recordType': 'HINDRANCE',
+    'recordType': _recordType,
     'hindranceId': _draft?['hindranceId'],
     'workflowStage': _workflowStage,
     'ccnRequired': _ccnRequired,
@@ -837,6 +1086,11 @@ class _HindranceScreenState extends State<HindranceScreen> {
     'blockName': _selectedBlock == null ? null : _displayName(_selectedBlock!),
     'ringId': _ringId,
     'ringName': _selectedRing == null ? null : _displayName(_selectedRing!),
+    'routeGroupKey': _routeGroupKey,
+    'routeGroupName': _routeGroups
+        .where((group) => group.key == _routeGroupKey)
+        .firstOrNull
+        ?.label,
     'affectedSegments': _segments
         .where(_isSegmentSelected)
         .map(
@@ -856,6 +1110,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
     'hindranceType': _hindranceType,
     'subHindranceType': _subHindranceType,
     'description': _descriptionController.text,
+    'otnReason': _otnReasonController.text,
+    'otnSubtype1': _otnSubtype1Controller.text,
+    'otnSubtype2': _otnSubtype2Controller.text,
     'ieAffected': _ieAffected,
     'ieName': _ieNameController.text,
     'iePhone': _iePhoneController.text,
@@ -904,8 +1161,10 @@ class _HindranceScreenState extends State<HindranceScreen> {
       _district = value?.district;
       _blockId = value?.id;
       _ringId = null;
+      _routeGroupKey = null;
       _segmentCodes.clear();
       _taskPackSaved = hasCachedRoutes;
+      _hierarchyLoadError = null;
       // A cached approved BoQ is immediately usable offline; keep the Ring
       // picker enabled while attempting a background refresh.
       _loadingHierarchy = value != null && !hasCachedRoutes;
@@ -940,17 +1199,21 @@ class _HindranceScreenState extends State<HindranceScreen> {
             .toList();
         if (_ringId != null && !availableRingIds.contains(_ringId)) {
           _ringId = null;
+          _routeGroupKey = null;
           _segmentCodes.clear();
         }
         _loadingHierarchy = false;
+        _hierarchyLoadError = null;
       });
       await _persistSelectedTaskPack(value.id);
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _loadingHierarchy = false;
+        _hierarchyLoadError = hasCachedRoutes
+            ? null
+            : _hierarchyErrorMessage(error);
       });
-      if (!hasCachedRoutes) _showMessage(_errorMessage(error));
     }
   }
 
@@ -1013,7 +1276,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
       final reportId = _uuid.v4();
       _draft = {
         'reportId': reportId,
-        'hindranceId': 'HIN-${reportId.toUpperCase()}',
+        'hindranceId': '${_isOtn ? 'OTN' : 'HIN'}-${reportId.toUpperCase()}',
         'createdAt': now,
       };
       _workflowStage = 'hierarchy_selection';
@@ -1025,6 +1288,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
       _district = null;
       _blockId = null;
       _ringId = null;
+      _routeGroupKey = null;
       _segmentCodes.clear();
       _media.clear();
       _shpFiles.clear();
@@ -1039,11 +1303,21 @@ class _HindranceScreenState extends State<HindranceScreen> {
   }
 
   Future<void> _resumeDraft(Map<String, dynamic> saved) async {
+    final savedReportId = saved['reportId']?.toString() ?? '';
+    if (saved['recordType']?.toString().toUpperCase() != _recordType) return;
+    if (PendingSyncManager.instance.isActive(savedReportId)) {
+      _showMessage(
+        'This Hindrance is syncing. Check Pending sync for progress.',
+      );
+      return;
+    }
     setState(() {
-      final reportId = saved['reportId'].toString();
+      final reportId = savedReportId;
       _draft = {
         'reportId': reportId,
-        'hindranceId': saved['hindranceId'] ?? 'HIN-${reportId.toUpperCase()}',
+        'hindranceId':
+            saved['hindranceId'] ??
+            '${_isOtn ? 'OTN' : 'HIN'}-${reportId.toUpperCase()}',
         'createdAt': saved['createdAt'],
       };
       _workflowStage =
@@ -1057,6 +1331,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
       _queueState = saved['queueState']?.toString() ?? 'LOCAL_SAVED';
       _blockId = saved['blockId']?.toString();
       _ringId = saved['ringId']?.toString();
+      _routeGroupKey = saved['routeGroupKey']?.toString();
       _segmentCodes
         ..clear()
         ..addAll(
@@ -1080,6 +1355,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
           ),
         );
       _descriptionController.text = saved['description']?.toString() ?? '';
+      _otnReasonController.text = saved['otnReason']?.toString() ?? '';
+      _otnSubtype1Controller.text = saved['otnSubtype1']?.toString() ?? '';
+      _otnSubtype2Controller.text = saved['otnSubtype2']?.toString() ?? '';
       _hindranceType = saved['hindranceType']?.toString();
       _subHindranceType = saved['subHindranceType']?.toString();
       _ieNameController.text = saved['ieName']?.toString() ?? '';
@@ -1144,6 +1422,414 @@ class _HindranceScreenState extends State<HindranceScreen> {
     await _submitHindrance();
   }
 
+  Future<int> _savedFileSize(Map item) async {
+    final knownSize = int.tryParse(item['sizeBytes']?.toString() ?? '');
+    if (knownSize != null && knownSize > 0) return knownSize;
+    final mediaId = item['mediaId']?.toString();
+    if (mediaId != null &&
+        (item['storage'] == 'indexeddb' || item['storage'] == 'database')) {
+      return (await _store.loadMediaBytes(mediaId))?.length ?? 0;
+    }
+    final path = item['path']?.toString();
+    if (path != null && path.isNotEmpty && !kIsWeb) {
+      final file = File(path);
+      if (await file.exists()) return file.length();
+    }
+    return 0;
+  }
+
+  Future<void> _storeBackgroundReport({
+    required String ownerId,
+    required String reportId,
+    required DateTime createdAt,
+    required Map<String, dynamic> payload,
+    required String state,
+  }) async {
+    payload['queueState'] = state;
+    payload['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+    await _store.saveReport(
+      reportId: reportId,
+      ownerId: ownerId,
+      state: state,
+      payload: payload,
+      createdAt: createdAt,
+    );
+    if (!mounted) return;
+    final record = {
+      ...payload,
+      'reportId': reportId,
+      'createdAt': createdAt.toIso8601String(),
+    };
+    setState(() {
+      final index = _savedReports.indexWhere(
+        (item) => item['reportId'] == reportId,
+      );
+      if (index < 0) {
+        _savedReports.insert(0, record);
+      } else {
+        _savedReports[index] = record;
+      }
+    });
+  }
+
+  Future<void> _restoreHindranceSyncRunners(
+    List<Map<String, dynamic>> reports,
+    List<TaskModel> tasks,
+  ) async {
+    final ownerId = _ownerId;
+    if (ownerId == null) return;
+    for (final saved in reports) {
+      if (saved['recordType']?.toString().toUpperCase() != _recordType) {
+        continue;
+      }
+      final state = saved['queueState']?.toString().toUpperCase();
+      if (!const {'PENDING_SYNC', 'SYNCING', 'SYNC_FAILED'}.contains(state)) {
+        continue;
+      }
+      final reportId = saved['reportId']?.toString() ?? '';
+      final block = tasks
+          .where((task) => task.id == saved['blockId'])
+          .firstOrNull;
+      final ring = HindranceTaskDataSource.ringsForBlock(
+        block,
+        tasks,
+      ).where((task) => task.id == saved['ringId']).firstOrNull;
+      if (reportId.isEmpty || block == null || ring == null) {
+        continue;
+      }
+      final selectedCodes = (saved['affectedSegments'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => item['code']?.toString() ?? '')
+          .where((code) => code.isNotEmpty)
+          .toSet();
+      final segments = HindranceTaskDataSource.segmentsForRing(ring, tasks)
+          .map((task) => task.routeSnapshot?.segments.firstOrNull)
+          .whereType<TaskSegmentModel>()
+          .where((segment) => selectedCodes.contains(segment.segmentCode))
+          .toList();
+      if (segments.length != selectedCodes.length || segments.isEmpty) {
+        continue;
+      }
+      final report = Map<String, dynamic>.from(saved)
+        ..['media'] = (saved['media'] as List? ?? const [])
+            .whereType<Map>()
+            .map(Map<String, dynamic>.from)
+            .toList()
+        ..['shpFiles'] = (saved['shpFiles'] as List? ?? const [])
+            .whereType<Map>()
+            .map(Map<String, dynamic>.from)
+            .toList();
+      final createdAt =
+          DateTime.tryParse(saved['createdAt']?.toString() ?? '') ??
+          DateTime.now().toUtc();
+      final totalBytes =
+          [
+            ...report['media'] as List,
+            ...report['shpFiles'] as List,
+          ].whereType<Map>().fold<int>(
+            0,
+            (sum, item) =>
+                sum + (int.tryParse(item['sizeBytes']?.toString() ?? '') ?? 0),
+          );
+      Future<void> runReport(Future<void> Function(int) onBytesSent) =>
+          (_isOtn ? _runOtnSync : _runHindranceSync)(
+            reportId: reportId,
+            ownerId: ownerId,
+            createdAt: createdAt,
+            report: report,
+            block: block,
+            ring: ring,
+            segments: segments,
+            totalBytes: totalBytes,
+            onBytesSent: onBytesSent,
+          );
+      PendingSyncManager.instance.registerRunner(reportId, runReport);
+      // Only replay phases that cannot have reached the final submit endpoint.
+      // A restored SUBMITTING job stays available for an explicit user retry,
+      // avoiding accidental duplicate task submissions.
+      var syncPhase = saved['syncPhase']?.toString().toUpperCase();
+      final hasTaskId = saved['serverTaskId']?.toString().isNotEmpty == true;
+      final priorUploadKeys =
+          [...report['media'] as List, ...report['shpFiles'] as List]
+              .whereType<Map>()
+              .where((item) => item['uploadKey']?.toString().isNotEmpty == true)
+              .length;
+      final priorBytes =
+          int.tryParse(saved['syncBytesSent']?.toString() ?? '') ?? 0;
+      // Legacy queue rows did not save a phase. If the task ID exists and no
+      // upload key/byte checkpoint exists, the media-first flow proves the
+      // final submit was not reached, so the saved upload can resume once.
+      if (syncPhase == null &&
+          hasTaskId &&
+          priorUploadKeys == 0 &&
+          priorBytes == 0) {
+        report['syncPhase'] = 'UPLOADING';
+        await _storeBackgroundReport(
+          ownerId: ownerId,
+          reportId: reportId,
+          createdAt: createdAt,
+          payload: report,
+          state: state!,
+        );
+        syncPhase = 'UPLOADING';
+      }
+      final safeToResume = const {
+        'QUEUED',
+        'UPLOADING',
+        'SAVING',
+      }.contains(syncPhase);
+      final failure = saved['syncError']?.toString().toLowerCase() ?? '';
+      final retryableFailure =
+          failure.isEmpty ||
+          failure.contains('socketexception') ||
+          failure.contains('failed host lookup') ||
+          failure.contains('network is unreachable') ||
+          failure.contains('connection timed out') ||
+          failure.contains('handshakeexception');
+      if (safeToResume &&
+          retryableFailure &&
+          (state == 'PENDING_SYNC' ||
+              state == 'SYNCING' ||
+              state == 'SYNC_FAILED')) {
+        PendingSyncManager.instance.start(
+          id: reportId,
+          formType: _workflowLabel,
+          totalBytes: totalBytes,
+          files: [
+            ...report['media'] as List,
+            ...report['shpFiles'] as List,
+          ].whereType<Map>().map(PendingSyncManager.fileLabel).toList(),
+          run: runReport,
+        );
+      }
+    }
+  }
+
+  Future<void> _retrySafelyResumableReports() async {
+    if (_checkingSyncRecovery || _ownerId == null) return;
+    _checkingSyncRecovery = true;
+    try {
+      final host = Uri.parse(AppConstants.ilyncApiBaseUrl).host;
+      final socket = await Socket.connect(
+        host,
+        443,
+        timeout: const Duration(seconds: 3),
+      );
+      socket.destroy();
+      final ownerId = _ownerId!;
+      final reports = await _store.loadReports(ownerId);
+      final safePending = reports.any((report) {
+        final state = report['queueState']?.toString().toUpperCase();
+        final phase = report['syncPhase']?.toString().toUpperCase();
+        return report['recordType']?.toString().toUpperCase() == _recordType &&
+            const {'PENDING_SYNC', 'SYNCING', 'SYNC_FAILED'}.contains(state) &&
+            const {'QUEUED', 'UPLOADING', 'SAVING'}.contains(phase);
+      });
+      if (!safePending) return;
+      final cached = await _taskSource.loadCached(ownerId);
+      PendingSyncManager.instance.restore(reports);
+      await _restoreHindranceSyncRunners(reports, cached.tasks);
+    } catch (_) {
+      // A connectivity probe is advisory. Keep local reports queued and retry
+      // on the next resume or periodic check without surfacing noisy errors.
+    } finally {
+      _checkingSyncRecovery = false;
+    }
+  }
+
+  Future<void> _runHindranceSync({
+    required String reportId,
+    required String ownerId,
+    required DateTime createdAt,
+    required Map<String, dynamic> report,
+    required TaskModel block,
+    required TaskModel ring,
+    required List<TaskSegmentModel> segments,
+    required int totalBytes,
+    required Future<void> Function(int) onBytesSent,
+  }) async {
+    var sentBytes = [...report['media'] as List, ...report['shpFiles'] as List]
+        .whereType<Map>()
+        .where((item) => item['uploadKey'] != null)
+        .fold<int>(
+          0,
+          (sum, item) =>
+              sum + (int.tryParse(item['sizeBytes']?.toString() ?? '') ?? 0),
+        );
+    var lastPersistedBytes = sentBytes;
+    report['syncBytesTotal'] = totalBytes;
+    report['syncBytesSent'] = sentBytes;
+    Future<void> checkpoint(String state) => _storeBackgroundReport(
+      ownerId: ownerId,
+      reportId: reportId,
+      createdAt: createdAt,
+      payload: report,
+      state: state,
+    );
+    try {
+      if (report['serverTaskId'] == null ||
+          report['serverTaskId'].toString().isEmpty) {
+        report['syncPhase'] = 'CREATING_TASK';
+        await checkpoint('SYNCING');
+      } else {
+        report['syncPhase'] = 'UPLOADING';
+        await checkpoint('SYNCING');
+      }
+      if (sentBytes > 0) {
+        await onBytesSent(sentBytes);
+        await checkpoint('SYNCING');
+      }
+      final submittedTaskId = await _submissionService.submit(
+        block: block,
+        ring: ring,
+        segments: segments,
+        report: report,
+        existingTaskId: report['serverTaskId']?.toString(),
+        onTaskCreated: (createdTaskId) async {
+          report
+            ..['serverTaskId'] = createdTaskId
+            ..['syncPhase'] = 'UPLOADING';
+          await checkpoint('SYNCING');
+        },
+        onBeforeSave: () async {
+          report['syncPhase'] = 'SAVING';
+          await checkpoint('SYNCING');
+        },
+        onBeforeSubmit: () async {
+          report['syncPhase'] = 'SUBMITTING';
+          await checkpoint('SYNCING');
+        },
+        onUploadProgress: () => checkpoint('SYNCING'),
+        onUploadBytes: (count) async {
+          sentBytes += count;
+          await onBytesSent(count);
+          if (sentBytes - lastPersistedBytes >= 1024 * 1024 ||
+              sentBytes >= totalBytes) {
+            report['syncBytesSent'] = sentBytes;
+            lastPersistedBytes = sentBytes;
+            await checkpoint('SYNCING');
+          }
+        },
+      );
+      report
+        ..['serverTaskId'] = submittedTaskId
+        ..['syncBytesSent'] = totalBytes
+        ..['syncError'] = null
+        ..['syncPhase'] = 'COMPLETE'
+        ..['workflowStage'] = 'ccn_question';
+      await checkpoint('SUBMITTED');
+      if (mounted && _draft == null) {
+        setState(() {
+          _serverTaskId = submittedTaskId;
+          _workflowStage = 'ccn_question';
+          _queueState = 'SUBMITTED';
+          _draft = {
+            'reportId': reportId,
+            'createdAt': createdAt.toIso8601String(),
+          };
+        });
+      }
+    } catch (error) {
+      report['syncError'] = _errorMessage(error);
+      report['syncBytesSent'] = sentBytes;
+      await checkpoint('SYNC_FAILED');
+      rethrow;
+    }
+  }
+
+  Future<void> _runOtnSync({
+    required String reportId,
+    required String ownerId,
+    required DateTime createdAt,
+    required Map<String, dynamic> report,
+    required TaskModel block,
+    required TaskModel ring,
+    required List<TaskSegmentModel> segments,
+    required int totalBytes,
+    required Future<void> Function(int) onBytesSent,
+  }) async {
+    var sentBytes = [...report['media'] as List, ...report['shpFiles'] as List]
+        .whereType<Map>()
+        .where((item) => item['uploadKey'] != null)
+        .fold<int>(
+          0,
+          (sum, item) =>
+              sum + (int.tryParse(item['sizeBytes']?.toString() ?? '') ?? 0),
+        );
+    var lastPersistedBytes = sentBytes;
+    report['syncBytesTotal'] = totalBytes;
+    report['syncBytesSent'] = sentBytes;
+    Future<void> checkpoint(String state) => _storeBackgroundReport(
+      ownerId: ownerId,
+      reportId: reportId,
+      createdAt: createdAt,
+      payload: report,
+      state: state,
+    );
+    try {
+      report['syncPhase'] = report['serverTaskId'] == null
+          ? 'CREATING_TASK'
+          : 'UPLOADING';
+      await checkpoint('SYNCING');
+      if (sentBytes > 0) await onBytesSent(sentBytes);
+      final submittedId = await _submissionService.submitOtn(
+        block: block,
+        ring: ring,
+        segments: segments,
+        report: report,
+        existingTaskId: report['serverTaskId']?.toString(),
+        onTaskCreated: (id) async {
+          report
+            ..['serverTaskId'] = id
+            ..['syncPhase'] = 'UPLOADING';
+          await checkpoint('SYNCING');
+        },
+        onBeforeSave: () async {
+          report['syncPhase'] = 'SAVING';
+          await checkpoint('SYNCING');
+        },
+        onBeforeSubmit: () async {
+          report['syncPhase'] = 'SUBMITTING';
+          await checkpoint('SYNCING');
+        },
+        onUploadProgress: () => checkpoint('SYNCING'),
+        onUploadBytes: (count) async {
+          sentBytes += count;
+          await onBytesSent(count);
+          if (sentBytes - lastPersistedBytes >= 1024 * 1024 ||
+              sentBytes >= totalBytes) {
+            report['syncBytesSent'] = sentBytes;
+            lastPersistedBytes = sentBytes;
+            await checkpoint('SYNCING');
+          }
+        },
+      );
+      report
+        ..['serverTaskId'] = submittedId
+        ..['syncBytesSent'] = totalBytes
+        ..['syncError'] = null
+        ..['syncPhase'] = 'COMPLETE'
+        ..['workflowStage'] = 'completed';
+      await checkpoint('SUBMITTED');
+      if (mounted && _draft == null) {
+        setState(() {
+          _serverTaskId = submittedId;
+          _workflowStage = 'completed';
+          _queueState = 'SUBMITTED';
+          _draft = {
+            'reportId': reportId,
+            'createdAt': createdAt.toIso8601String(),
+          };
+        });
+      }
+    } catch (error) {
+      report['syncError'] = _errorMessage(error);
+      report['syncBytesSent'] = sentBytes;
+      await checkpoint('SYNC_FAILED');
+      rethrow;
+    }
+  }
+
   Future<void> _createTaskAndContinue() async {
     final block = _selectedBlock;
     final ring = _selectedRing;
@@ -1170,6 +1856,8 @@ class _HindranceScreenState extends State<HindranceScreen> {
         block: block,
         ring: ring,
         segments: selectedSegments,
+        taskType: _recordType,
+        taskName: '$_recordType at ${ring.displayName}',
       );
       if (!mounted) return;
       _serverTaskId = taskId;
@@ -1178,7 +1866,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
       if (!saved || !mounted) return;
       setState(() => _draft = null);
       _showMessage(
-        'Task ID received: $taskId. Partially saved Hindrance is on the list; tap it to complete the form.',
+        'Task ID received: $taskId. Partially saved $_workflowLabel is on the list; tap it to complete the form.',
       );
     } catch (error) {
       if (mounted) {
@@ -1205,18 +1893,58 @@ class _HindranceScreenState extends State<HindranceScreen> {
       ),
     );
     if (result == null || !mounted) return;
+    if (result['queued'] == true) {
+      setState(() => _draft = null);
+      _showMessage('CCN saved. Upload is continuing in Pending sync.');
+      return;
+    }
     setState(() {
       _ccnId = result['ccnId']?.toString();
+      _workflowStage = 'completed';
     });
-    await _submitHindrance();
+    final saved = await _persistDraft(state: 'SUBMITTED');
+    if (!saved || !mounted) return;
+    setState(() => _draft = null);
+    _showMessage(
+      'Hindrance and CCN are submitted. Hindrance ID: ${_serverTaskId ?? 'saved'}; CCN ID: ${_ccnId ?? 'saved'}.',
+    );
   }
 
   Future<void> _finishWithoutCcn() async {
-    await _submitHindrance();
+    if (_serverTaskId == null || _serverTaskId!.isEmpty) {
+      _showMessage(
+        'The Hindrance has not been submitted yet. Submit it first.',
+      );
+      return;
+    }
+    setState(() => _workflowStage = 'completed');
+    final saved = await _persistDraft(state: 'SUBMITTED');
+    if (!saved || !mounted) return;
+    setState(() => _draft = null);
+    _showMessage('Hindrance saved and done. ID: $_serverTaskId');
   }
 
   Future<void> _submitHindrance() async {
     if (_isSubmitted) return;
+    if (_isOtn) {
+      final slots = _media.map((item) => item['slot']?.toString()).toSet();
+      if (!slots.contains('start_point') || !slots.contains('end_point')) {
+        _showMessage(
+          'Capture both the OTN start and end point photos before submitting.',
+        );
+        return;
+      }
+      if (!slots.contains('walkthrough')) {
+        _showMessage(
+          'Capture the OTN route walkthrough video before submitting.',
+        );
+        return;
+      }
+      if (_descriptionController.text.trim().isEmpty) {
+        _showMessage('Enter the OTN details before submitting.');
+        return;
+      }
+    }
     final block = _selectedBlock;
     final ring = _selectedRing;
     final report = _payload();
@@ -1229,64 +1957,91 @@ class _HindranceScreenState extends State<HindranceScreen> {
       _showMessage('Capture the IE photo or mark IE as not affected.');
       return;
     }
-    final draftSaved = await _persistDraft(state: 'PARTIALLY_SAVED');
-    if (!draftSaved || !mounted) return;
-    setState(() => _saving = true);
+    final ownerId = _ownerId;
+    final draft = _draft;
+    if (ownerId == null || draft == null) return;
+    final reportId = draft['reportId'] as String;
+    if (PendingSyncManager.instance.isActive(reportId)) return;
+    final createdAt =
+        DateTime.tryParse(draft['createdAt'] as String? ?? '') ??
+        DateTime.now().toUtc();
+    final selectedSegments = _segments.where(_isSegmentSelected).toList();
+    final media = (report['media'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    final shpFiles = (report['shpFiles'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    var totalBytes = 0;
+    for (final item in [...media, ...shpFiles]) {
+      final size = await _savedFileSize(item);
+      item['sizeBytes'] = size;
+      totalBytes += size;
+    }
+    report['syncBytesTotal'] = totalBytes;
+    report['syncBytesSent'] = 0;
+    report['syncPhase'] = 'QUEUED';
+    report['serverTaskId'] = _serverTaskId;
+    report['syncError'] = null;
+    report['createdAt'] = createdAt.toIso8601String();
+    _queueState = 'PENDING_SYNC';
     try {
-      final taskId = _serverTaskId;
-      final submittedTaskId = await _submissionService.submit(
-        block: block,
-        ring: ring,
-        segments: _segments.where(_isSegmentSelected).toList(),
-        report: report,
-        existingTaskId: taskId,
-        onTaskCreated: (createdTaskId) async {
-          if (!mounted) return;
-          setState(() {
-            _serverTaskId = createdTaskId;
-          });
-          final saved = await _persistDraft(state: 'PARTIALLY_SAVED');
-          if (!saved) {
-            throw StateError(
-              'The Hindrance ID was created but could not be saved on this device. Keep this ID for recovery: $createdTaskId',
-            );
-          }
-        },
-        onUploadProgress: () async {
-          final saved = await _persistDraft(state: 'PARTIALLY_SAVED');
-          if (!saved) {
-            throw StateError(
-              'Uploaded evidence is still on this device, but its progress could not be saved. Retry after checking device storage.',
-            );
-          }
-        },
-      );
-      if (!mounted) return;
-      setState(() {
-        _workflowStage = 'completed';
-      });
-      final saved = await _persistDraft(state: 'SUBMITTED');
-      if (!saved || !mounted) return;
-      setState(() => _draft = null);
-      _showMessage(
-        'Hindrance submitted for review. Submission ID: $submittedTaskId',
+      await _storeBackgroundReport(
+        ownerId: ownerId,
+        reportId: reportId,
+        createdAt: createdAt,
+        payload: report,
+        state: 'PENDING_SYNC',
       );
     } catch (error) {
-      if (mounted) {
-        setState(() => _workflowStage = 'hindrance_form');
-        await _persistDraft(state: 'PARTIALLY_SAVED');
-        _showMessage(
-          'Partially saved on this device. Hindrance is still open; check your connection and tap Submit Hindrance to retry. ${_errorMessage(error)}',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      _showMessage('Could not queue the $_workflowLabel for sync: $error');
+      return;
     }
+    if (!mounted) return;
+
+    // Close the form immediately. The captured payload, hierarchy, and files
+    // remain in the account-scoped store while the upload continues.
+    setState(() {
+      _draft = null;
+      _saving = false;
+    });
+    PendingSyncManager.instance.start(
+      id: reportId,
+      formType: _workflowLabel,
+      totalBytes: totalBytes,
+      files: [...media, ...shpFiles].map(PendingSyncManager.fileLabel).toList(),
+      run: (onBytesSent) => (_isOtn ? _runOtnSync : _runHindranceSync)(
+        reportId: reportId,
+        ownerId: ownerId,
+        createdAt: createdAt,
+        report: report,
+        block: block,
+        ring: ring,
+        segments: selectedSegments,
+        totalBytes: totalBytes,
+        onBytesSent: onBytesSent,
+      ),
+    );
+    _showMessage(
+      '$_workflowLabel saved. Upload is continuing in Pending sync.',
+    );
   }
 
   String _errorMessage(Object error) {
     if (error is StateError) return error.message.toString();
     return error.toString().replaceFirst('Exception: ', '');
+  }
+
+  String _hierarchyErrorMessage(Object error) {
+    final message = _errorMessage(error);
+    final normalized = message.toLowerCase();
+    if (normalized.contains('socketexception') ||
+        normalized.contains('failed host lookup') ||
+        normalized.contains('network is unreachable') ||
+        normalized.contains('connection timed out')) {
+      return 'No saved Ring data for this Block. Connect to the internet and select this Block to sync its approved BoQ for offline use.';
+    }
+    return message;
   }
 
   Future<void> _capturePhoto(String slot) async {
@@ -1297,6 +2052,8 @@ class _HindranceScreenState extends State<HindranceScreen> {
         ownerId: _ownerId!,
         reportId: _draft!['reportId'] as String,
         slot: slot,
+        recordType: _recordType,
+        createdAt: DateTime.tryParse(_draft?['createdAt']?.toString() ?? ''),
       );
       if (media != null && mounted) {
         setState(() => _media.add(media));
@@ -1318,6 +2075,8 @@ class _HindranceScreenState extends State<HindranceScreen> {
         reportId: _draft!['reportId'] as String,
         slot: slot,
         maxDuration: duration,
+        recordType: _recordType,
+        createdAt: DateTime.tryParse(_draft?['createdAt']?.toString() ?? ''),
       );
       if (media != null && mounted) {
         setState(() => _media.add(media));
@@ -1335,14 +2094,22 @@ class _HindranceScreenState extends State<HindranceScreen> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: const ['shp', 'shx', 'dbf', 'prj', 'cpg'],
+        allowedExtensions: _isOtn
+            ? const ['kml']
+            : const ['shp', 'shx', 'dbf', 'prj', 'cpg'],
         allowMultiple: true,
         withReadStream: !kIsWeb,
         withData: kIsWeb,
       );
       if (result == null) return;
       final files = result.files;
-      if (!files.any((file) => file.extension?.toLowerCase() == 'shp')) {
+      if (_isOtn &&
+          !files.every((file) => file.extension?.toLowerCase() == 'kml')) {
+        _showMessage('Select a .kml file for OTN.');
+        return;
+      }
+      if (!_isOtn &&
+          !files.any((file) => file.extension?.toLowerCase() == 'shp')) {
         _showMessage(
           'Select the .shp file with any related .shx, .dbf, .prj, or .cpg files.',
         );
@@ -1356,6 +2123,10 @@ class _HindranceScreenState extends State<HindranceScreen> {
             filename: file.name,
             kind: 'shp_component',
             bytes: file.bytes!,
+            recordType: _recordType,
+            createdAt: DateTime.tryParse(
+              _draft?['createdAt']?.toString() ?? '',
+            ),
           );
           _shpFiles.removeWhere((item) => item['name'] == file.name);
           _shpFiles.add(saved);
@@ -1428,6 +2199,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
       );
     }
     for (final item in removed.toSet()) {
+      await _mediaService.deleteFileManagerCopy(item);
       final path = item['path']?.toString();
       if (item['storage'] == 'indexeddb' && item['mediaId'] != null) {
         await _store.deleteMediaBytes(item['mediaId'].toString());
@@ -1444,6 +2216,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
     final existingIndex = _media.indexWhere((m) => m['slot'] == slot);
     if (existingIndex != -1) {
       final oldMedia = _media[existingIndex];
+      await _mediaService.deleteFileManagerCopy(oldMedia);
       final path = oldMedia['path']?.toString();
       if (oldMedia['storage'] == 'indexeddb' && oldMedia['mediaId'] != null) {
         try {
@@ -1520,10 +2293,11 @@ class _HindranceScreenState extends State<HindranceScreen> {
       child: Scaffold(
         backgroundColor: AppColors.softGray,
         appBar: AppBar(
-          title: const Text('Hindrance'),
+          title: Text(_workflowLabel),
           backgroundColor: AppColors.headerGreen,
           foregroundColor: Colors.white,
           actions: [
+            const PendingSyncAction(),
             IconButton(
               tooltip: 'Refresh task data',
               onPressed: _loading ? null : () => _load(forceRefresh: true),
@@ -1543,9 +2317,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         if (_loading)
-          const _Notice(
+          _Notice(
             icon: Icons.storage_outlined,
-            text: 'Opening saved Hindrance data…',
+            text: 'Opening saved $_workflowLabel data…',
           ),
         if (_error != null) _Notice(icon: Icons.info_outline, text: _error!),
         if (_syncingTasks)
@@ -1587,68 +2361,71 @@ class _HindranceScreenState extends State<HindranceScreen> {
           ),
         _outlineAction(
           icon: Icons.add,
-          label: 'New Hindrance Report',
+          label: 'New $_workflowLabel Report',
           onPressed: _startNewDraft,
         ),
         const SizedBox(height: 24),
-        Text(
-          'Hindrance tasks from Dev',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        if (_loadingServerHindrances)
-          const _Notice(
-            icon: Icons.sync,
-            text: 'Loading created Hindrance tasks from Dev…',
+        ...[
+          Text(
+            '$_workflowLabel tasks from Dev',
+            style: Theme.of(context).textTheme.titleMedium,
           ),
-        if (_serverHindranceLoadFailed && _serverHindranceTasks.isEmpty)
-          const _Notice(
-            icon: Icons.cloud_off,
-            text:
-                'Could not reach Dev to load Hindrance tasks. Check the connection and refresh.',
-          ),
-        if (!_loadingServerHindrances &&
-            !_serverHindranceLoadFailed &&
-            _visibleServerHindrances.isEmpty)
-          const _Notice(
-            icon: Icons.inbox_outlined,
-            text: 'No created Hindrance tasks were returned for this account.',
-          ),
-        for (final task in _visibleServerHindrances)
-          HindranceGlassSurface(
-            padding: EdgeInsets.zero,
-            margin: const EdgeInsets.only(bottom: 10),
-            radius: 14,
-            child: ListTile(
-              leading: const Icon(
-                Icons.cloud_done_outlined,
-                color: AppColors.primaryGreen,
-              ),
-              title: Text(task.displayName),
-              subtitle: Text(
-                '${task.taskCode} · ${task.status} · ${task.circle} / ${task.district}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: const Icon(Icons.visibility_outlined),
-              onTap: () => _showServerTaskPreview(task),
+          const SizedBox(height: 8),
+          if (_loadingServerHindrances)
+            _Notice(
+              icon: Icons.sync,
+              text: 'Loading created $_workflowLabel tasks from Dev…',
             ),
-          ),
-        if (_serverHindrancesHaveMore)
-          OutlinedButton.icon(
-            onPressed: _loadingServerHindrances
-                ? null
-                : () => _loadServerHindranceTasks(
-                    page: _serverHindranceNextPage,
-                    append: true,
-                  ),
-            icon: const Icon(Icons.expand_more),
-            label: Text(
-              _loadingServerHindrances
-                  ? 'Loading…'
-                  : 'Load more Dev Hindrance tasks',
+          if (_serverHindranceLoadFailed && _serverHindranceTasks.isEmpty)
+            _Notice(
+              icon: Icons.cloud_off,
+              text:
+                  'Could not reach Dev to load $_workflowLabel tasks. Check the connection and refresh.',
             ),
-          ),
+          if (!_loadingServerHindrances &&
+              !_serverHindranceLoadFailed &&
+              _visibleServerHindrances.isEmpty)
+            _Notice(
+              icon: Icons.inbox_outlined,
+              text:
+                  'No created $_workflowLabel tasks were returned for this account.',
+            ),
+          for (final task in _visibleServerHindrances)
+            HindranceGlassSurface(
+              padding: EdgeInsets.zero,
+              margin: const EdgeInsets.only(bottom: 10),
+              radius: 14,
+              child: ListTile(
+                leading: const Icon(
+                  Icons.cloud_done_outlined,
+                  color: AppColors.primaryGreen,
+                ),
+                title: Text(task.displayName),
+                subtitle: Text(
+                  '${task.taskCode} · ${task.status} · ${task.circle} / ${task.district}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: const Icon(Icons.visibility_outlined),
+                onTap: () => _showServerTaskPreview(task),
+              ),
+            ),
+          if (_serverHindrancesHaveMore)
+            OutlinedButton.icon(
+              onPressed: _loadingServerHindrances
+                  ? null
+                  : () => _loadServerHindranceTasks(
+                      page: _serverHindranceNextPage,
+                      append: true,
+                    ),
+              icon: const Icon(Icons.expand_more),
+              label: Text(
+                _loadingServerHindrances
+                    ? 'Loading…'
+                    : 'Load more Dev $_workflowLabel tasks',
+              ),
+            ),
+        ],
         const SizedBox(height: 16),
         Text(
           'Offline drafts and pending reports',
@@ -1656,9 +2433,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
         ),
         const SizedBox(height: 8),
         if (_savedReports.isEmpty)
-          const _Notice(
+          _Notice(
             icon: Icons.inventory_2_outlined,
-            text: 'No local hindrance reports yet.',
+            text: 'No local $_workflowLabel reports yet.',
           ),
         for (final report in _savedReports)
           HindranceGlassSurface(
@@ -1673,7 +2450,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
               title: Text(
                 (report['taskName'] ??
                         report['blockName'] ??
-                        'New hindrance report')
+                        'New ${_workflowLabel.toLowerCase()} report')
                     .toString(),
               ),
               subtitle: Text(
@@ -1786,17 +2563,76 @@ class _HindranceScreenState extends State<HindranceScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           children: [
-            const Text(
-              'Choose the affected route segments. The Hindrance form opens after the task is created.',
+            Text(
+              _isOtn
+                  ? 'Choose the affected route segments. The OTN evidence form opens after you continue.'
+                  : 'Choose the affected route segments. The Hindrance form opens after the task is created.',
             ),
             _section('Block → Ring → Segments', [
               _buildHierarchySelector(),
+              if (_loadingBoqApprovals) ...[
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: LinearProgressIndicator(),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Checking approved BoQs for Circle Blocks ($_boqApprovalChecked/$_boqApprovalTotal)…',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+              if (_boqApprovalLoadError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _boqApprovalLoadError!,
+                          style: const TextStyle(
+                            color: Color(0xFF7C2D12),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => unawaited(_preloadBoqApprovals()),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!_loadingBoqApprovals &&
+                  _circle != null &&
+                  _districts.isEmpty &&
+                  _boqApprovalLoadError == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'No District in this Circle has a Block with exactly one approved BoQ revision.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              if (!_loadingBoqApprovals &&
+                  _circle != null &&
+                  _district != null &&
+                  _visibleBlocks.isEmpty &&
+                  _boqApprovalLoadError == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'No Block in this District has exactly one approved BoQ revision.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
               if (_loadingHierarchy)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: LinearProgressIndicator(),
                 ),
-              if (_blockId != null)
+              if (_blockId != null && _hierarchyLoadError == null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
@@ -1808,6 +2644,37 @@ class _HindranceScreenState extends State<HindranceScreen> {
                         ? 'This hierarchy is available offline.'
                         : 'This hierarchy is not saved offline yet.',
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              if (_hierarchyLoadError != null)
+                Container(
+                  margin: const EdgeInsets.only(top: 10),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7ED),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFED7AA)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.cloud_off_outlined,
+                        size: 18,
+                        color: Color(0xFFB45309),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _hierarchyLoadError!,
+                          style: const TextStyle(
+                            color: Color(0xFF7C2D12),
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
             ]),
@@ -1824,9 +2691,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
               onPressed: _saving || _loadingHierarchy
                   ? null
                   : _createTaskAndContinue,
-              child: Text(
-                _saving ? 'Creating Hindrance…' : 'Submit & Continue',
-              ),
+              child: Text(_saving ? 'Preparing $_workflowLabel…' : 'Continue'),
             ),
           ),
         ),
@@ -1836,7 +2701,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
 
   Widget _buildForm() {
     if (_workflowStage == 'hierarchy_selection') return _buildSelectionStep();
-    if (_workflowStage == 'ccn_question') return _buildCcnQuestion();
+    if (_workflowStage == 'ccn_question' && !_isOtn) {
+      return _buildCcnQuestion();
+    }
     final start = _media
         .where((item) => item['slot'] == 'start_point')
         .firstOrNull;
@@ -1882,7 +2749,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
                   ),
                   Expanded(
                     child: Text(
-                      _isSubmitted ? 'Hindrance Preview' : 'New Hindrance',
+                      _isSubmitted
+                          ? '$_workflowLabel Preview'
+                          : 'New $_workflowLabel',
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
@@ -1937,8 +2806,11 @@ class _HindranceScreenState extends State<HindranceScreen> {
                   text:
                       'Browser camera and file selection are available when permitted. Captured evidence is saved in this browser for offline access.',
                 ),
-              _section('Hindrance Task Details', [
-                _detailRow('Hindrance ID', _serverTaskId ?? '—'),
+              _section('$_workflowLabel Task Details', [
+                _detailRow(
+                  _isOtn ? 'Local OTN ID' : 'Hindrance ID',
+                  _serverTaskId ?? _draft?['hindranceId']?.toString() ?? '—',
+                ),
                 _detailRow(
                   'Block',
                   _selectedBlock == null ? '—' : _displayName(_selectedBlock!),
@@ -1960,46 +2832,77 @@ class _HindranceScreenState extends State<HindranceScreen> {
                     _segments.where(_isSegmentSelected).toList(),
                   ),
               ]),
-              _section('Hindrance Classification', [
-                DropdownButtonFormField<String>(
-                  key: ValueKey('hindrance-type-$_hindranceType'),
-                  initialValue: _dropdownValue(_hindranceType),
-                  decoration: const InputDecoration(
-                    labelText: 'Hindrance Type',
-                    border: OutlineInputBorder(),
+              _section(_isOtn ? 'OTN Details' : 'Hindrance Classification', [
+                if (_isOtn) ...[
+                  TextField(
+                    controller: _otnReasonController,
+                    enabled: !_isSubmitted,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                  hint: const Text('Select Hindrance Type'),
-                  items: _classificationItems(
-                    HindranceClassification.types,
-                    _hindranceType,
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _otnSubtype1Controller,
+                    enabled: !_isSubmitted,
+                    decoration: const InputDecoration(
+                      labelText: 'Subtype 1',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                  onChanged: _isSubmitted
-                      ? null
-                      : (value) {
-                          setState(() => _hindranceType = value);
-                          _queueAutosave();
-                        },
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  key: ValueKey('sub-hindrance-type-$_subHindranceType'),
-                  initialValue: _dropdownValue(_subHindranceType),
-                  decoration: const InputDecoration(
-                    labelText: 'Sub-Hindrance Type',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _otnSubtype2Controller,
+                    enabled: !_isSubmitted,
+                    decoration: const InputDecoration(
+                      labelText: 'Subtype 2',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                  hint: const Text('Select Sub-Hindrance Type'),
-                  items: _classificationItems(
-                    HindranceClassification.subtypes,
-                    _subHindranceType,
+                  const SizedBox(height: 12),
+                ],
+                if (!_isOtn)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('hindrance-type-$_hindranceType'),
+                    initialValue: _dropdownValue(_hindranceType),
+                    decoration: const InputDecoration(
+                      labelText: 'Hindrance Type',
+                      border: OutlineInputBorder(),
+                    ),
+                    hint: const Text('Select Hindrance Type'),
+                    items: _classificationItems(
+                      HindranceClassification.types,
+                      _hindranceType,
+                    ),
+                    onChanged: _isSubmitted
+                        ? null
+                        : (value) {
+                            setState(() => _hindranceType = value);
+                            _queueAutosave();
+                          },
                   ),
-                  onChanged: _isSubmitted
-                      ? null
-                      : (value) {
-                          setState(() => _subHindranceType = value);
-                          _queueAutosave();
-                        },
-                ),
+                if (!_isOtn) const SizedBox(height: 16),
+                if (!_isOtn)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('sub-hindrance-type-$_subHindranceType'),
+                    initialValue: _dropdownValue(_subHindranceType),
+                    decoration: const InputDecoration(
+                      labelText: 'Sub-Hindrance Type',
+                      border: OutlineInputBorder(),
+                    ),
+                    hint: const Text('Select Sub-Hindrance Type'),
+                    items: _classificationItems(
+                      HindranceClassification.subtypes,
+                      _subHindranceType,
+                    ),
+                    onChanged: _isSubmitted
+                        ? null
+                        : (value) {
+                            setState(() => _subHindranceType = value);
+                            _queueAutosave();
+                          },
+                  ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _descriptionController,
@@ -2007,14 +2910,16 @@ class _HindranceScreenState extends State<HindranceScreen> {
                   maxLength: 500,
                   minLines: 3,
                   maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Bottleneck Description',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: _isOtn
+                        ? 'OTN details'
+                        : 'Bottleneck Description',
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
                 _captureStep(
-                  title: 'Hindrance Start Point',
+                  title: _isOtn ? 'OTN Start Point' : 'Hindrance Start Point',
                   slot: 'start_point',
                   record: start,
                   buttonText: 'Capture Start Photo',
@@ -2034,7 +2939,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
                 ),
                 const SizedBox(height: 16),
                 _captureStep(
-                  title: 'Hindrance End Point',
+                  title: _isOtn ? 'OTN End Point' : 'Hindrance End Point',
                   slot: 'end_point',
                   record: end,
                   buttonText: 'Capture End Photo',
@@ -2167,8 +3072,8 @@ class _HindranceScreenState extends State<HindranceScreen> {
                   ),
                 ],
                 const SizedBox(height: 18),
-                const Text(
-                  'Upload SHP File',
+                Text(
+                  _isOtn ? 'Upload KML File' : 'Upload SHP File',
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 10),
@@ -2177,7 +3082,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
                       ? null
                       : _pickShpComponents,
                   icon: const Icon(Icons.folder_open),
-                  label: const Text('Select SHP and related files'),
+                  label: Text(
+                    _isOtn ? 'Select KML file' : 'Select SHP and related files',
+                  ),
                 ),
                 for (final item in _shpFiles)
                   ListTile(
@@ -2193,10 +3100,11 @@ class _HindranceScreenState extends State<HindranceScreen> {
                   ),
               ]),
               const SizedBox(height: 16),
-              const _Notice(
+              _Notice(
                 icon: Icons.cloud_upload_outlined,
-                text:
-                    'Submitting requests presigned upload URLs, uploads photos, videos, and SHP files to S3, then sends their returned keys with the report.',
+                text: _isOtn
+                    ? 'OTN evidence uploads to the task service before the OTN form is submitted.'
+                    : 'Submitting requests presigned upload URLs, uploads photos, videos, and SHP files to S3, then sends their returned keys with the report.',
               ),
             ],
           ),
@@ -2214,6 +3122,8 @@ class _HindranceScreenState extends State<HindranceScreen> {
                       ? 'Submitting…'
                       : _isSubmitted
                       ? 'Already submitted'
+                      : _isOtn
+                      ? 'Submit OTN'
                       : 'Submit Hindrance',
                 ),
               ),
@@ -2232,7 +3142,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
             children: [
-              _section('Hindrance Saved Offline', [
+              _section('Hindrance Submitted', [
                 _detailRow(
                   'Hindrance ID',
                   report['hindranceId']?.toString() ?? '',
@@ -2257,9 +3167,9 @@ class _HindranceScreenState extends State<HindranceScreen> {
                 ),
                 const SizedBox(height: 8),
                 const _Notice(
-                  icon: Icons.cloud_off_outlined,
+                  icon: Icons.verified_outlined,
                   text:
-                      'This hindrance is stored locally. Choose whether a related CCN is required.',
+                      'The Hindrance was accepted by the server. Choose whether a related CCN is required.',
                 ),
               ]),
               _section('Is CCN required?', [
@@ -2308,7 +3218,7 @@ class _HindranceScreenState extends State<HindranceScreen> {
                 _ccnRequired == true
                     ? 'Continue to CCN'
                     : _ccnRequired == false
-                    ? 'Submit Hindrance'
+                    ? 'Save and Done'
                     : 'Choose Yes or No',
               ),
             ),
@@ -2701,12 +3611,18 @@ class _HindranceScreenState extends State<HindranceScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            record['kind'] == 'video'
+                            record['fileManagerExportError'] != null
+                                ? 'File manager copy failed · ${record['fileManagerExportError']}'
+                                : record['fileManagerFolder'] != null
+                                ? 'Files: ${record['fileManagerFolder']}'
+                                : record['kind'] == 'video'
                                 ? 'Saved video · tap preview'
                                 : 'Saved photo · tap to enlarge',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
-                              color: Colors.black54,
+                              color: record['fileManagerExportError'] != null
+                                  ? AppColors.criticalRed
+                                  : Colors.black54,
                             ),
                           ),
                         ],

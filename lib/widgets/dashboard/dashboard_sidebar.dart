@@ -243,6 +243,11 @@ class _DashboardSidebarState extends State<DashboardSidebar> {
             icon: Icons.report_problem_outlined,
           ),
           _NavItemData(
+            title: 'OTN',
+            permission: 'tasks.view',
+            icon: Icons.route_outlined,
+          ),
+          _NavItemData(
             title: 'CCN',
             permission: 'tasks.view',
             icon: Icons.route_outlined,

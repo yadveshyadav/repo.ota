@@ -73,13 +73,12 @@ class AttendanceController extends ChangeNotifier {
     AttendanceCameraService? cameraService,
     AttendanceFaceDetectionService? faceDetectionService,
     AttendancePhotoStampService? photoStampService,
-  })  : repository = repository ?? ApiAttendanceRepository(),
-        locationService = locationService ?? AppLocationService(),
-        cameraService = cameraService ?? AttendanceCameraService(),
-        faceDetectionService =
-            faceDetectionService ?? AttendanceFaceDetectionService(),
-        photoStampService =
-            photoStampService ?? AttendancePhotoStampService() {
+  }) : repository = repository ?? ApiAttendanceRepository(),
+       locationService = locationService ?? AppLocationService(),
+       cameraService = cameraService ?? AttendanceCameraService(),
+       faceDetectionService =
+           faceDetectionService ?? AttendanceFaceDetectionService(),
+       photoStampService = photoStampService ?? AttendancePhotoStampService() {
     _startAutoSyncTimer();
   }
 
@@ -91,7 +90,9 @@ class AttendanceController extends ChangeNotifier {
         final unsynced = await AttendanceStorageService().getUnsyncedRecords();
         if (unsynced.isNotEmpty) {
           if (kDebugMode) {
-            print('[AttendanceController] 2-min auto-sync triggered for ${unsynced.length} pending record(s)...');
+            print(
+              '[AttendanceController] 2-min auto-sync triggered for ${unsynced.length} pending record(s)...',
+            );
           }
           await syncPendingAttendance();
         }
@@ -181,8 +182,11 @@ class AttendanceController extends ChangeNotifier {
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
-      return local.year == now.year && local.month == now.month && local.day == now.day;
+      return local.year == now.year &&
+          local.month == now.month &&
+          local.day == now.day;
     }
+
     final records = _markedMachineAttendanceMap.values
         .where((r) => isSameDay(r.checkInTime ?? r.createdAt))
         .map((r) => r.id)
@@ -196,8 +200,11 @@ class AttendanceController extends ChangeNotifier {
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
-      return local.year == now.year && local.month == now.month && local.day == now.day;
+      return local.year == now.year &&
+          local.month == now.month &&
+          local.day == now.day;
     }
+
     final records = _markedTeamAttendanceMap.values
         .where((r) => isSameDay(r.checkInTime ?? r.createdAt))
         .map((r) => r.id)
@@ -221,7 +228,9 @@ class AttendanceController extends ChangeNotifier {
     bool isSameDay(DateTime dt) {
       final local = dt.toLocal();
       final nowLocal = now.toLocal();
-      return local.year == nowLocal.year && local.month == nowLocal.month && local.day == nowLocal.day;
+      return local.year == nowLocal.year &&
+          local.month == nowLocal.month &&
+          local.day == nowLocal.day;
     }
 
     if (!isSameDay(checkInTime)) return;
@@ -241,11 +250,14 @@ class AttendanceController extends ChangeNotifier {
       if (record.userId.trim().isNotEmpty) {
         _markedTeamAttendanceMap[record.userId.trim().toLowerCase()] = record;
       }
-      if (record.markedForUserId != null && record.markedForUserId!.trim().isNotEmpty) {
-        _markedTeamAttendanceMap[record.markedForUserId!.trim().toLowerCase()] = record;
+      if (record.markedForUserId != null &&
+          record.markedForUserId!.trim().isNotEmpty) {
+        _markedTeamAttendanceMap[record.markedForUserId!.trim().toLowerCase()] =
+            record;
       }
       if (record.employeeId != null && record.employeeId!.trim().isNotEmpty) {
-        _markedTeamAttendanceMap[record.employeeId!.trim().toLowerCase()] = record;
+        _markedTeamAttendanceMap[record.employeeId!.trim().toLowerCase()] =
+            record;
       }
     }
 
@@ -259,7 +271,10 @@ class AttendanceController extends ChangeNotifier {
       final now = DateTime.now().toLocal();
       for (final rec in localRecords) {
         final dt = rec.checkInTime?.toLocal();
-        if (dt != null && dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+        if (dt != null &&
+            dt.year == now.year &&
+            dt.month == now.month &&
+            dt.day == now.day) {
           _registerTeamAttendanceRecord(rec);
         }
       }
@@ -267,12 +282,18 @@ class AttendanceController extends ChangeNotifier {
   }
 
   /// Returns today's active attendance record for a specific team member or user ID, if any.
-  AttendanceModel? getTodayAttendanceForUser(String targetUserId, {String? employeeId, String? userName}) {
+  AttendanceModel? getTodayAttendanceForUser(
+    String targetUserId, {
+    String? employeeId,
+    String? userName,
+  }) {
     final nowLocal = DateTime.now().toLocal();
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
-      return local.year == nowLocal.year && local.month == nowLocal.month && local.day == nowLocal.day;
+      return local.year == nowLocal.year &&
+          local.month == nowLocal.month &&
+          local.day == nowLocal.day;
     }
 
     final idClean = targetUserId.trim().toLowerCase();
@@ -289,12 +310,17 @@ class AttendanceController extends ChangeNotifier {
 
     if (_todayAttendance != null && !_todayAttendance!.isMachineAttendance) {
       final t = _todayAttendance!;
-      final matchesUser = (t.userId.toLowerCase().trim() == idClean) ||
-          (t.markedForUserId != null && t.markedForUserId!.toLowerCase().trim() == idClean) ||
-          (empClean.isNotEmpty && t.employeeId != null && t.employeeId!.toLowerCase().trim() == empClean);
+      final matchesUser =
+          (t.userId.toLowerCase().trim() == idClean) ||
+          (t.markedForUserId != null &&
+              t.markedForUserId!.toLowerCase().trim() == idClean) ||
+          (empClean.isNotEmpty &&
+              t.employeeId != null &&
+              t.employeeId!.toLowerCase().trim() == empClean);
 
       final statusUpper = t.status.toUpperCase();
-      final isMarkedStatus = t.checkInTime != null &&
+      final isMarkedStatus =
+          t.checkInTime != null &&
           statusUpper != 'NOT_MARKED' &&
           statusUpper != 'NOT_CHECKED_IN' &&
           statusUpper != 'REJECTED' &&
@@ -307,19 +333,27 @@ class AttendanceController extends ChangeNotifier {
 
     for (final record in _history) {
       if (record.isMachineAttendance) continue;
-      final matchesUser = (record.userId.toLowerCase().trim() == idClean) ||
-          (record.markedForUserId != null && record.markedForUserId!.toLowerCase().trim() == idClean) ||
-          (empClean.isNotEmpty && record.employeeId != null && record.employeeId!.toLowerCase().trim() == empClean);
+      final matchesUser =
+          (record.userId.toLowerCase().trim() == idClean) ||
+          (record.markedForUserId != null &&
+              record.markedForUserId!.toLowerCase().trim() == idClean) ||
+          (empClean.isNotEmpty &&
+              record.employeeId != null &&
+              record.employeeId!.toLowerCase().trim() == empClean);
 
       final checkInTime = record.checkInTime;
       final statusUpper = record.status.toUpperCase();
-      final isMarkedStatus = checkInTime != null &&
+      final isMarkedStatus =
+          checkInTime != null &&
           statusUpper != 'NOT_MARKED' &&
           statusUpper != 'NOT_CHECKED_IN' &&
           statusUpper != 'REJECTED' &&
           record.approvalStatus != 'REJECTED';
 
-      if (matchesUser && checkInTime != null && isSameDay(checkInTime) && isMarkedStatus) {
+      if (matchesUser &&
+          checkInTime != null &&
+          isSameDay(checkInTime) &&
+          isMarkedStatus) {
         return record;
       }
     }
@@ -333,7 +367,9 @@ class AttendanceController extends ChangeNotifier {
     bool isSameDay(DateTime? dt) {
       if (dt == null) return false;
       final local = dt.toLocal();
-      return local.year == nowLocal.year && local.month == nowLocal.month && local.day == nowLocal.day;
+      return local.year == nowLocal.year &&
+          local.month == nowLocal.month &&
+          local.day == nowLocal.day;
     }
 
     final chassisLower = chassisNo.toLowerCase().trim();
@@ -345,13 +381,17 @@ class AttendanceController extends ChangeNotifier {
 
       if (cNo.isNotEmpty && cNo != 'n/a') {
         if (cNo == chassisLower) return true;
-        if (cNo.length >= 6 && chassisLower.length >= 6 && (cNo.endsWith(chassisLower) || chassisLower.endsWith(cNo))) {
+        if (cNo.length >= 6 &&
+            chassisLower.length >= 6 &&
+            (cNo.endsWith(chassisLower) || chassisLower.endsWith(cNo))) {
           return true;
         }
       }
       if (mId.isNotEmpty && mId != 'n/a') {
         if (mId == chassisLower) return true;
-        if (mId.length >= 6 && chassisLower.length >= 6 && (mId.endsWith(chassisLower) || chassisLower.endsWith(mId))) {
+        if (mId.length >= 6 &&
+            chassisLower.length >= 6 &&
+            (mId.endsWith(chassisLower) || chassisLower.endsWith(mId))) {
           return true;
         }
       }
@@ -362,12 +402,16 @@ class AttendanceController extends ChangeNotifier {
     if (_markedMachineAttendanceMap.containsKey(chassisLower)) {
       final rec = _markedMachineAttendanceMap[chassisLower]!;
       final statusUpper = rec.status.toUpperCase();
-      final isMarkedStatus = rec.checkInTime != null &&
+      final isMarkedStatus =
+          rec.checkInTime != null &&
           statusUpper != 'NOT_MARKED' &&
           statusUpper != 'NOT_CHECKED_IN' &&
           statusUpper != 'REJECTED' &&
           rec.approvalStatus != 'REJECTED';
-      if (rec.checkInTime != null && isSameDay(rec.checkInTime) && isMarkedStatus) return rec;
+      if (rec.checkInTime != null &&
+          isSameDay(rec.checkInTime) &&
+          isMarkedStatus)
+        return rec;
     }
 
     // 2. Strict key match in map
@@ -378,12 +422,16 @@ class AttendanceController extends ChangeNotifier {
       if (isMachineMatch(key, null)) {
         final rec = entry.value;
         final statusUpper = rec.status.toUpperCase();
-        final isMarkedStatus = rec.checkInTime != null &&
+        final isMarkedStatus =
+            rec.checkInTime != null &&
             statusUpper != 'NOT_MARKED' &&
             statusUpper != 'NOT_CHECKED_IN' &&
             statusUpper != 'REJECTED' &&
             rec.approvalStatus != 'REJECTED';
-        if (rec.checkInTime != null && isSameDay(rec.checkInTime) && isMarkedStatus) return rec;
+        if (rec.checkInTime != null &&
+            isSameDay(rec.checkInTime) &&
+            isMarkedStatus)
+          return rec;
       }
     }
 
@@ -393,13 +441,17 @@ class AttendanceController extends ChangeNotifier {
       final matchesMachine = isMachineMatch(t.machineChassisNo, t.machineId);
 
       final statusUpper = t.status.toUpperCase();
-      final isMarkedStatus = t.checkInTime != null &&
+      final isMarkedStatus =
+          t.checkInTime != null &&
           statusUpper != 'NOT_MARKED' &&
           statusUpper != 'NOT_CHECKED_IN' &&
           statusUpper != 'REJECTED' &&
           t.approvalStatus != 'REJECTED';
 
-      if (matchesMachine && t.checkInTime != null && isSameDay(t.checkInTime) && isMarkedStatus) {
+      if (matchesMachine &&
+          t.checkInTime != null &&
+          isSameDay(t.checkInTime) &&
+          isMarkedStatus) {
         return t;
       }
     }
@@ -408,16 +460,23 @@ class AttendanceController extends ChangeNotifier {
     for (final record in _history) {
       if (!record.isMachineAttendance) continue;
 
-      final matchesMachine = isMachineMatch(record.machineChassisNo, record.machineId);
+      final matchesMachine = isMachineMatch(
+        record.machineChassisNo,
+        record.machineId,
+      );
       final checkInTime = record.checkInTime;
       final statusUpper = record.status.toUpperCase();
-      final isMarkedStatus = checkInTime != null &&
+      final isMarkedStatus =
+          checkInTime != null &&
           statusUpper != 'NOT_MARKED' &&
           statusUpper != 'NOT_CHECKED_IN' &&
           statusUpper != 'REJECTED' &&
           record.approvalStatus != 'REJECTED';
 
-      if (matchesMachine && checkInTime != null && isSameDay(checkInTime) && isMarkedStatus) {
+      if (matchesMachine &&
+          checkInTime != null &&
+          isSameDay(checkInTime) &&
+          isMarkedStatus) {
         return record;
       }
     }
@@ -434,7 +493,8 @@ class AttendanceController extends ChangeNotifier {
     try {
       final count = await repository.syncPendingRecords();
       if (count > 0) {
-        _infoMessage = 'Successfully synced $count offline attendance record(s) with server.';
+        _infoMessage =
+            'Successfully synced $count offline attendance record(s) with server.';
         await fetchHistory();
         await fetchTodayAttendance();
       }
@@ -492,6 +552,27 @@ class AttendanceController extends ChangeNotifier {
     }
   }
 
+  /// Load only the machines the HERO web attendance roster associates with
+  /// the selected team attendance date.
+  Future<void> fetchTeamAttendanceMachines() async {
+    _isLoadingToday = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final user = AuthStorageService().currentUser;
+      _assignedMachines = await repository.getTeamAttendanceMachines(
+        user?.id ?? '1',
+      );
+      await _syncLocalTeamRecords();
+      _isLoadingToday = false;
+      notifyListeners();
+    } catch (e) {
+      _isLoadingToday = false;
+      _errorMessage = 'Unable to load attendance machines.';
+      notifyListeners();
+    }
+  }
+
   /// Fetch authorized team members for supervisor
   Future<void> fetchAuthorizedTeamMembers() async {
     _isLoadingHistory = true;
@@ -543,13 +624,15 @@ class AttendanceController extends ChangeNotifier {
       _infoMessage = null;
 
       if (!_useTestLocation && locResult.accuracy > maxLocationAccuracyMeters) {
-        _infoMessage = 'GPS accuracy is ±${locResult.accuracy.toStringAsFixed(1)}m.';
+        _infoMessage =
+            'GPS accuracy is ±${locResult.accuracy.toStringAsFixed(1)}m.';
       }
 
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
+      _errorMessage =
+          'Unable to capture your current location. Please enable location services and try again.';
       _infoMessage = null;
       notifyListeners();
       return false;
@@ -588,8 +671,9 @@ class AttendanceController extends ChangeNotifier {
       _isVerifyingFace = true;
       notifyListeners();
 
-      final validation =
-          await faceDetectionService.validateAttendanceSelfie(photo.path);
+      final validation = await faceDetectionService.validateAttendanceSelfie(
+        photo.path,
+      );
 
       _isVerifyingFace = false;
 
@@ -598,7 +682,8 @@ class AttendanceController extends ChangeNotifier {
         _capturedPhotoPath = null;
         _capturedPhotoBytes = null;
         _faceVerified = false;
-        _faceRejectionMessage = validation.message ??
+        _faceRejectionMessage =
+            validation.message ??
             'No face detected. Please look at the camera and retake a clear selfie.';
         _errorMessage = null;
         notifyListeners();
@@ -725,7 +810,8 @@ class AttendanceController extends ChangeNotifier {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
+      _errorMessage =
+          'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -751,10 +837,16 @@ class AttendanceController extends ChangeNotifier {
 
       _registerTeamAttendanceRecord(record);
       if (machine.chassisNumber.isNotEmpty) {
-        _markedMachineAttendanceMap[machine.chassisNumber.trim().toLowerCase()] = record;
+        _markedMachineAttendanceMap[machine.chassisNumber
+                .trim()
+                .toLowerCase()] =
+            record;
       }
       if (machine.machineChassisNo.isNotEmpty) {
-        _markedMachineAttendanceMap[machine.machineChassisNo.trim().toLowerCase()] = record;
+        _markedMachineAttendanceMap[machine.machineChassisNo
+                .trim()
+                .toLowerCase()] =
+            record;
       }
       await AttendanceStorageService().saveRecord(record);
 
@@ -762,7 +854,8 @@ class AttendanceController extends ChangeNotifier {
         _todayAttendance = record;
       }
       if (!record.isSynced) {
-        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+        _infoMessage =
+            'Attendance saved offline due to poor network. It will automatically sync when connected.';
       }
       _isSubmitting = false;
       notifyListeners();
@@ -796,7 +889,8 @@ class AttendanceController extends ChangeNotifier {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
+      _errorMessage =
+          'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -825,7 +919,8 @@ class AttendanceController extends ChangeNotifier {
 
       _todayAttendance = record;
       if (!record.isSynced) {
-        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+        _infoMessage =
+            'Attendance saved offline due to poor network. It will automatically sync when connected.';
       }
       _isSubmitting = false;
       notifyListeners();
@@ -847,9 +942,7 @@ class AttendanceController extends ChangeNotifier {
   /// Submit Check-In Transaction
   Future<bool> submitCheckIn() async {
     if (_selectedTaskId != null && _selectedTaskId!.isNotEmpty) {
-      return markTaskMusterAttendance(
-        taskId: _selectedTaskId!,
-      );
+      return markTaskMusterAttendance(taskId: _selectedTaskId!);
     }
 
     if (_isSubmitting) return false;
@@ -867,7 +960,8 @@ class AttendanceController extends ChangeNotifier {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
+      _errorMessage =
+          'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -895,7 +989,8 @@ class AttendanceController extends ChangeNotifier {
 
       _todayAttendance = newAttendance;
       if (!newAttendance.isSynced) {
-        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+        _infoMessage =
+            'Attendance saved offline due to poor network. It will automatically sync when connected.';
       }
       _isSubmitting = false;
       notifyListeners();
@@ -931,7 +1026,8 @@ class AttendanceController extends ChangeNotifier {
       await captureFreshLocation();
     }
     if (_capturedLocation == null) {
-      _errorMessage = 'Unable to capture your current location. Please enable location services and try again.';
+      _errorMessage =
+          'Unable to capture your current location. Please enable location services and try again.';
       notifyListeners();
       return false;
     }
@@ -960,7 +1056,8 @@ class AttendanceController extends ChangeNotifier {
 
       _todayAttendance = updatedAttendance;
       if (!updatedAttendance.isSynced) {
-        _infoMessage = 'Attendance saved offline due to poor network. It will automatically sync when connected.';
+        _infoMessage =
+            'Attendance saved offline due to poor network. It will automatically sync when connected.';
       }
       _isSubmitting = false;
       notifyListeners();
@@ -986,7 +1083,10 @@ class AttendanceController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _history = await repository.getHistory(page: page, statusFilter: statusFilter);
+      _history = await repository.getHistory(
+        page: page,
+        statusFilter: statusFilter,
+      );
       for (final item in _history) {
         _registerTeamAttendanceRecord(item);
       }
@@ -1023,7 +1123,10 @@ class AttendanceController extends ChangeNotifier {
   }
 
   /// Manager Approves Attendance Record
-  Future<bool> approveAttendance(String attendanceId, {String remarks = 'Attendance approved'}) async {
+  Future<bool> approveAttendance(
+    String attendanceId, {
+    String remarks = 'Attendance approved',
+  }) async {
     _errorMessage = null;
     notifyListeners();
 
@@ -1092,7 +1195,10 @@ class AttendanceController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final success = await repository.rejectAttendance(attendanceId, cleanReason);
+      final success = await repository.rejectAttendance(
+        attendanceId,
+        cleanReason,
+      );
       if (!success) {
         await repository.rejectMuster(attendanceId, reason: cleanReason);
       }

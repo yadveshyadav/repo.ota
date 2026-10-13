@@ -41,6 +41,7 @@ abstract class AppRoutes {
   static const String vendors = '/vendors';
   static const String tasks = '/tasks';
   static const String hindrance = '/hindrance';
+  static const String otn = '/otn';
   static const String ccn = '/ccn';
   static const String taskDetail = '/task-detail';
   static const String team = '/team';
@@ -88,6 +89,10 @@ abstract class AppRoutes {
     hindrance: (context) => _guardRoute(
       permission: 'tasks.view',
       builder: (ctx) => const HindranceScreen(),
+    )(context),
+    otn: (context) => _guardRoute(
+      permission: 'tasks.view',
+      builder: (ctx) => const HindranceScreen(workflowType: 'OTN'),
     )(context),
     ccn: (context) => _guardRoute(
       permission: 'tasks.view',

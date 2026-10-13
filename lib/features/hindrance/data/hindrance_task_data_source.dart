@@ -19,6 +19,22 @@ class HindranceTaskData {
   });
 }
 
+class HindranceRouteGroup {
+  final String key;
+  final String startName;
+  final String endName;
+  final List<TaskSegmentModel> segments;
+
+  const HindranceRouteGroup({
+    required this.key,
+    required this.startName,
+    required this.endName,
+    required this.segments,
+  });
+
+  String get label => '$startName → $endName';
+}
+
 /// Loads planning Blocks from live master data and their Ring/Segment choices
 /// from the approved Geo BoQ. The task-list endpoint is assignment-scoped and
 /// therefore is not a source for all Blocks that can be used for a Hindrance.
@@ -31,6 +47,58 @@ class HindranceTaskDataSource {
 
   final TaskApiService _api;
   final HindranceLocalStore _store;
+  final Map<String, Future<List<Map<String, dynamic>>>> _approvedPlanLoads = {};
+
+  /// Groups route segments using the BoQ API's startLocation/endLocation
+  /// metadata, then orders each path by connected start/end nodes. These are
+  /// the GP-to-GP paths shown as selectable routes inside a Ring.
+  static List<HindranceRouteGroup> routeGroupsForSegments(
+    List<TaskSegmentModel> segments,
+  ) {
+    final grouped = <String, List<TaskSegmentModel>>{};
+    final labels = <String, (String, String)>{};
+    for (final segment in segments) {
+      final start = segment.groupStart?.trim() ?? '';
+      final end = segment.groupEnd?.trim() ?? '';
+      if (start.isEmpty || end.isEmpty) continue;
+      final startIdentity = segment.groupStartId?.trim().isNotEmpty == true
+          ? segment.groupStartId!.trim()
+          : start.toLowerCase();
+      final endIdentity = segment.groupEndId?.trim().isNotEmpty == true
+          ? segment.groupEndId!.trim()
+          : end.toLowerCase();
+      final key = '$startIdentity::$endIdentity';
+      grouped.putIfAbsent(key, () => []).add(segment);
+      labels.putIfAbsent(key, () => (start, end));
+    }
+
+    return grouped.entries.map((entry) {
+      final (startName, endName) = labels[entry.key]!;
+      final remaining = [...entry.value]
+        ..sort(
+          (left, right) => (left.sequenceNo ?? 1 << 30).compareTo(
+            right.sequenceNo ?? 1 << 30,
+          ),
+        );
+      final ordered = <TaskSegmentModel>[];
+      var currentNode = startName.toLowerCase();
+      while (remaining.isNotEmpty) {
+        var index = remaining.indexWhere(
+          (segment) => segment.startNode.trim().toLowerCase() == currentNode,
+        );
+        if (index < 0) index = 0;
+        final next = remaining.removeAt(index);
+        ordered.add(next);
+        currentNode = next.targetNode.trim().toLowerCase();
+      }
+      return HindranceRouteGroup(
+        key: entry.key,
+        startName: startName,
+        endName: endName,
+        segments: ordered,
+      );
+    }).toList()..sort((left, right) => left.label.compareTo(right.label));
+  }
 
   static bool isBlockTask(TaskModel task) => task.taskLevelProvided
       ? task.taskLevel.toUpperCase() == 'BLOCK'
@@ -165,6 +233,7 @@ class HindranceTaskDataSource {
               routeName: segment.segmentCode,
               distanceKm: segment.distanceKm,
               segmentsCount: 1,
+              segments: [segment],
               startNode: RouteNodeModel(
                 id: '${segment.segmentCode}:start',
                 code: segment.startNode,
@@ -310,54 +379,7 @@ class HindranceTaskDataSource {
     final blockId = block.locationSnapshot?.blockId?.trim().isNotEmpty == true
         ? block.locationSnapshot!.blockId!.trim()
         : block.id;
-    final plansResponse = await _api.fetchPlanningData(
-      '/geo/api/boq/plans?blockId=${Uri.encodeQueryComponent(blockId)}&size=50',
-    );
-    final plansData = _dataMap(plansResponse);
-    final plans = (plansData?['content'] as List? ?? const [])
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .where((item) => item['id'] != null || item['planId'] != null)
-        .toList();
-    if (plans.isEmpty) {
-      throw StateError(
-        'No BoQ plan is available in Dev for ${block.displayName}. Refresh master data or select a Block with a BoQ plan.',
-      );
-    }
-
-    final approvedPlans = <Map<String, dynamic>>[];
-    for (final plan in plans) {
-      final planId = (plan['id'] ?? plan['planId']).toString();
-      final revisionResponse = await _api.fetchPlanningData(
-        '/geo/api/boq/plans/${Uri.encodeComponent(planId)}/revisions',
-      );
-      final revisionData = _dataMap(revisionResponse);
-      final revisionRows =
-          revisionData?['content'] ??
-          revisionData?['revisions'] ??
-          _dataList(revisionResponse);
-      final revisions = (revisionRows as List? ?? const [])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .where(
-            (item) => item['status']?.toString().toUpperCase() == 'APPROVED',
-          )
-          .toList();
-      revisions.sort(
-        (left, right) =>
-            (int.tryParse(right['revisionNo']?.toString() ?? '') ?? -1)
-                .compareTo(
-                  int.tryParse(left['revisionNo']?.toString() ?? '') ?? -1,
-                ),
-      );
-      if (revisions.isNotEmpty && revisions.first['revisionNo'] != null) {
-        approvedPlans.add({
-          ...plan,
-          'resolvedPlanId': planId,
-          'resolvedRevisionNo': revisions.first['revisionNo'],
-        });
-      }
-    }
+    final approvedPlans = await _approvedPlansForBlock(block);
     if (approvedPlans.isEmpty) {
       throw StateError(
         'No approved BoQ revision is available for ${block.displayName}. Select a Block with an approved BoQ.',
@@ -434,6 +456,86 @@ class HindranceTaskDataSource {
           'projectPhase': location!.projectPhase,
       },
     );
+  }
+
+  /// Checks whether a Block has exactly one approved plan, the same eligibility
+  /// required to load its route hierarchy.
+  Future<bool> hasUsableApprovedBoq(TaskModel block) async =>
+      (await _approvedPlansForBlock(block)).length == 1;
+
+  Future<List<Map<String, dynamic>>> _approvedPlansForBlock(TaskModel block) {
+    final blockId = block.locationSnapshot?.blockId?.trim().isNotEmpty == true
+        ? block.locationSnapshot!.blockId!.trim()
+        : block.id;
+    return _approvedPlanLoads.putIfAbsent(blockId, () async {
+      try {
+        final plansResponse = await _api.fetchPlanningData(
+          '/geo/api/boq/plans?blockId=${Uri.encodeQueryComponent(blockId)}&size=50',
+        );
+        if (plansResponse is Map && plansResponse['success'] == false) {
+          throw StateError(
+            plansResponse['message']?.toString() ??
+                'Dev could not load BoQ plans for ${block.displayName}.',
+          );
+        }
+        final plansData = _dataMap(plansResponse);
+        final planRows =
+            plansData?['content'] ??
+            plansData?['plans'] ??
+            _dataList(plansResponse);
+        final plans = (planRows as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .where((item) => item['id'] != null || item['planId'] != null)
+            .toList();
+        if (plans.isEmpty) return const <Map<String, dynamic>>[];
+
+        final approvedPlans = <Map<String, dynamic>>[];
+        for (final plan in plans) {
+          final planId = (plan['id'] ?? plan['planId']).toString();
+          final revisionResponse = await _api.fetchPlanningData(
+            '/geo/api/boq/plans/${Uri.encodeComponent(planId)}/revisions',
+          );
+          if (revisionResponse is Map && revisionResponse['success'] == false) {
+            throw StateError(
+              revisionResponse['message']?.toString() ??
+                  'Dev could not load BoQ revisions for ${block.displayName}.',
+            );
+          }
+          final revisionData = _dataMap(revisionResponse);
+          final revisionRows =
+              revisionData?['content'] ??
+              revisionData?['revisions'] ??
+              _dataList(revisionResponse);
+          final revisions = (revisionRows as List? ?? const [])
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .where(
+                (item) =>
+                    item['status']?.toString().toUpperCase() == 'APPROVED',
+              )
+              .toList();
+          revisions.sort(
+            (left, right) =>
+                (int.tryParse(right['revisionNo']?.toString() ?? '') ?? -1)
+                    .compareTo(
+                      int.tryParse(left['revisionNo']?.toString() ?? '') ?? -1,
+                    ),
+          );
+          if (revisions.isNotEmpty && revisions.first['revisionNo'] != null) {
+            approvedPlans.add({
+              ...plan,
+              'resolvedPlanId': planId,
+              'resolvedRevisionNo': revisions.first['revisionNo'],
+            });
+          }
+        }
+        return approvedPlans;
+      } catch (_) {
+        _approvedPlanLoads.remove(blockId);
+        rethrow;
+      }
+    });
   }
 
   Future<List<TaskModel>> _loadMasterBlocks() async {
@@ -561,6 +663,8 @@ class HindranceTaskDataSource {
           final segment = rawSegment;
           final start = segment['startNode'] ?? segment['startLocation'];
           final end = segment['endNode'] ?? segment['endLocation'];
+          final groupStart = segment['startLocation'];
+          final groupEnd = segment['endLocation'];
           return TaskSegmentModel(
             taskId: segment['id']?.toString(),
             segmentCode:
@@ -582,6 +686,15 @@ class HindranceTaskDataSource {
             targetLng: number(
               end is Map ? (end['lng'] ?? end['longitude']) : null,
             ),
+            groupStart: nodeName(groupStart, null),
+            groupEnd: nodeName(groupEnd, null),
+            groupStartId: groupStart is Map
+                ? (groupStart['id'] ?? groupStart['code'])?.toString()
+                : null,
+            groupEndId: groupEnd is Map
+                ? (groupEnd['id'] ?? groupEnd['code'])?.toString()
+                : null,
+            sequenceNo: int.tryParse(segment['sequenceNo']?.toString() ?? ''),
           );
         })
         .where((segment) => segment.segmentCode.isNotEmpty)

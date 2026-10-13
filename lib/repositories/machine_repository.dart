@@ -3,7 +3,6 @@ import '../features/auth/services/auth_storage_service.dart';
 import '../models/machine.dart';
 import '../models/machine_response.dart';
 import '../services/api/api_client.dart';
-import '../services/api/attendance_api_service.dart';
 import '../services/api/machine_api_service.dart';
 
 /// Abstract Machine Repository interface
@@ -21,35 +20,18 @@ abstract class MachineRepository {
 /// Production ApiMachineRepository fetching from Hero / Fiberforce API
 class ApiMachineRepository implements MachineRepository {
   final MachineApiService apiService;
-  final AttendanceApiService _attendanceApiService;
 
-  ApiMachineRepository({
-    ApiClient? apiClient,
-    MachineApiService? apiService,
-    AttendanceApiService? attendanceApiService,
-  })  : apiService = apiService ??
-            MachineApiService(apiClient: apiClient ?? ApiClient()),
-        _attendanceApiService = attendanceApiService ??
-            AttendanceApiService(apiClient: apiClient ?? ApiClient());
+  ApiMachineRepository({ApiClient? apiClient, MachineApiService? apiService})
+    : apiService =
+          apiService ?? MachineApiService(apiClient: apiClient ?? ApiClient());
 
   @override
   Future<MachineResponse> getMachines() async {
     try {
-      final user = AuthStorageService().currentUser;
-
-      if (user == null || user.isAdmin) {
-        return await apiService.fetchMachines();
-      }
-
-      final results = await Future.wait([
-        apiService.fetchMachines(),
-        _attendanceApiService.fetchMyAssignedMachines().catchError((_) => <Machine>[]),
-      ]);
-
-      final response = results[0] as MachineResponse;
-      final assignedMachines = results[1] as List<Machine>;
-
-      return response.filteredForUser(user, assignedList: assignedMachines);
+      // The authenticated HERO endpoint already applies the account's vendor
+      // and assignment scope. Filtering it again by /auth/me fields drops valid
+      // rows for profiles that do not expose vendor/chassis assignment fields.
+      return await apiService.fetchMachines();
     } catch (e) {
       if (kDebugMode) {
         print('[ApiMachineRepository] Error fetching machines from API ($e)');
@@ -85,7 +67,11 @@ class ApiMachineRepository implements MachineRepository {
         final matchesType = machine.machineType.toLowerCase().contains(query);
         final matchesLoc = machine.location.toLowerCase().contains(query);
         final matchesModel = machine.model.toLowerCase().contains(query);
-        if (!matchesId && !matchesName && !matchesType && !matchesLoc && !matchesModel) {
+        if (!matchesId &&
+            !matchesName &&
+            !matchesType &&
+            !matchesLoc &&
+            !matchesModel) {
           return false;
         }
       }
@@ -119,7 +105,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 1,
       siteName: 'Primary Site',
       isCommissioned: true,
-      fuelCard: {'id': 1, 'name': 'Indian Oil', 'card_number': '7125021301570140'},
+      fuelCard: {
+        'id': 1,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570140',
+      },
       operatorInfo: {'name': 'TEST VENDOR'},
       vendorName: 'TEST PARTNER',
       status: 'IDLE',
@@ -139,7 +129,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 1,
       siteName: 'Primary Site',
       isCommissioned: true,
-      fuelCard: {'id': 2, 'name': 'Indian Oil', 'card_number': '7125021301570141'},
+      fuelCard: {
+        'id': 2,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570141',
+      },
       operatorInfo: {'name': 'TEST VENDOR'},
       vendorName: 'TEST PARTNER',
       status: 'IDLE',
@@ -159,7 +153,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: true,
-      fuelCard: {'id': 6, 'name': 'Indian Oil', 'card_number': '7125021301570140'},
+      fuelCard: {
+        'id': 6,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570140',
+      },
       operatorInfo: {'name': 'Mahaveer Gurjar'},
       vendorName: 'Gurukripa Enterprises',
       status: 'IDLE',
@@ -179,7 +177,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 7, 'name': 'Indian Oil', 'card_number': '7125021301570157'},
+      fuelCard: {
+        'id': 7,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570157',
+      },
       operatorInfo: {'name': 'Jagjit'},
       vendorName: 'HARPAL INFRA DEVELOPMENT',
       status: 'IDLE',
@@ -199,7 +201,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 8, 'name': 'Indian Oil', 'card_number': '7127021301570132'},
+      fuelCard: {
+        'id': 8,
+        'name': 'Indian Oil',
+        'card_number': '7127021301570132',
+      },
       operatorInfo: {'name': 'Rahul'},
       vendorName: 'KHALSA TELECOM',
       status: 'IDLE',
@@ -219,7 +225,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 2, 'name': 'Indian Oil', 'card_number': '7125021301570090'},
+      fuelCard: {
+        'id': 2,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570090',
+      },
       operatorInfo: {'name': 'Ranjeet Choudhary'},
       vendorName: 'Naveen Telecom',
       status: 'MAINTENANCE',
@@ -239,7 +249,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 1, 'name': 'Indian Oil', 'card_number': '7125021301570124'},
+      fuelCard: {
+        'id': 1,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570124',
+      },
       operatorInfo: {'name': 'Mahendra Gujjar'},
       vendorName: 'Naveen Telecom Network',
       status: 'RUNNING',
@@ -278,7 +292,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 9, 'name': 'Indian Oil', 'card_number': '7125021301570082'},
+      fuelCard: {
+        'id': 9,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570082',
+      },
       operatorInfo: {'name': 'Chandan Kumar Verma'},
       vendorName: 'Raj Enterprises',
       status: 'IDLE',
@@ -317,7 +335,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 4, 'name': 'Indian Oil', 'card_number': '7127021301570108'},
+      fuelCard: {
+        'id': 4,
+        'name': 'Indian Oil',
+        'card_number': '7127021301570108',
+      },
       operatorInfo: null,
       vendorName: 'Naveen Telecom Network 2',
       status: 'RUNNING',
@@ -337,7 +359,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 3, 'name': 'Indian Oil', 'card_number': '7126021301570173'},
+      fuelCard: {
+        'id': 3,
+        'name': 'Indian Oil',
+        'card_number': '7126021301570173',
+      },
       operatorInfo: {'name': 'Devaram Choudhary'},
       vendorName: 'Naveen Telecom Network 1',
       status: 'IDLE',
@@ -357,7 +383,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: true,
-      fuelCard: {'id': 5, 'name': 'Indian Oil', 'card_number': '7125021301570215'},
+      fuelCard: {
+        'id': 5,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570215',
+      },
       operatorInfo: null,
       vendorName: 'Shri Balaji Infra Project',
       status: 'IDLE',
@@ -567,7 +597,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: false,
-      fuelCard: {'id': 10, 'name': 'Indian Oil', 'card_number': '7125021301570165'},
+      fuelCard: {
+        'id': 10,
+        'name': 'Indian Oil',
+        'card_number': '7125021301570165',
+      },
       operatorInfo: null,
       vendorName: 'HERO INFRASTRUCTURE',
       status: 'IDLE',
@@ -587,7 +621,11 @@ class MockMachineRepository implements MachineRepository {
       siteId: 16,
       siteName: 'Sujangarh-SITE',
       isCommissioned: true,
-      fuelCard: {'id': 12, 'name': 'Indian Oil', 'card_number': '7127021301570066'},
+      fuelCard: {
+        'id': 12,
+        'name': 'Indian Oil',
+        'card_number': '7127021301570066',
+      },
       operatorInfo: null,
       vendorName: 'Vikas kumar',
       status: 'IDLE',
@@ -825,7 +863,11 @@ class MockMachineRepository implements MachineRepository {
         final matchesType = machine.machineType.toLowerCase().contains(query);
         final matchesLoc = machine.location.toLowerCase().contains(query);
         final matchesModel = machine.model.toLowerCase().contains(query);
-        if (!matchesId && !matchesName && !matchesType && !matchesLoc && !matchesModel) {
+        if (!matchesId &&
+            !matchesName &&
+            !matchesType &&
+            !matchesLoc &&
+            !matchesModel) {
           return false;
         }
       }

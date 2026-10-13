@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 import 'package:hero_app/features/auth/services/auth_storage_service.dart';
@@ -13,11 +14,14 @@ import 'package:hero_app/features/hindrance/data/hindrance_local_store.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_media_service.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_route_recorder.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_submission_service.dart';
+import 'package:hero_app/features/hindrance/data/pending_sync_manager.dart';
 import 'package:hero_app/features/hindrance/data/hindrance_task_data_source.dart';
 import 'package:hero_app/features/hindrance/screens/ccn_camera_recording_screen.dart';
 import 'package:hero_app/features/hindrance/widgets/hindrance_route_preview.dart';
 import 'package:hero_app/features/hindrance/widgets/hindrance_glass_surface.dart';
+import 'package:hero_app/features/hindrance/widgets/pending_sync_action.dart';
 import 'package:hero_app/models/task_model.dart';
+import 'package:hero_app/services/api/task_api_service.dart';
 import 'package:uuid/uuid.dart';
 
 /// CCN evidence workflow. It can be opened from a saved Hindrance or directly
@@ -38,8 +42,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   final _routeRecorder = HindranceRouteRecorder();
   final _taskSource = HindranceTaskDataSource();
   final _submissionService = HindranceSubmissionService();
+  final _taskApi = TaskApiService();
   final _description = TextEditingController();
-  final _quantityRows = <Map<String, String>>[{}, {}, {}];
   final List<Map<String, dynamic>> _media = [];
   String? _ownerId;
   String? _reportId;
@@ -52,18 +56,22 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   String _kmlChoice = 'generated';
   Map<String, dynamic>? _kmlArtifact;
   List<Map<String, dynamic>> _routePoints = [];
+  List<Map<String, dynamic>> _proposedRoutePoints = [];
   List<TaskModel> _tasks = [];
   List<TaskModel> _cachedTasks = [];
   String? _blockId;
   String? _circle;
   String? _district;
   String? _ringId;
+  String? _routeGroupKey;
   final Set<String> _segmentCodes = {};
   bool _hierarchyConfirmed = false;
   bool _tasksFromCache = false;
   bool _taskListHasMore = false;
   bool _loadingMoreTasks = false;
   bool _loadingHierarchy = false;
+  String? _hierarchyLoadError;
+  String _approvalStatus = 'PENDING';
   int _nextTaskPage = 1;
   bool _saving = false;
   bool _loading = true;
@@ -75,9 +83,20 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       _media.where((item) => item['slot'] == 'ccn_walkthrough').firstOrNull;
   Map<String, dynamic>? get _mediaAtEnd =>
       _media.where((item) => item['slot'] == 'ccn_end_point').firstOrNull;
+  Map<String, dynamic>? get _proposedMediaAtStart =>
+      _media.where((item) => item['slot'] == 'ccn_new_start_point').firstOrNull;
+  Map<String, dynamic>? get _proposedWalkthrough =>
+      _media.where((item) => item['slot'] == 'ccn_new_walkthrough').firstOrNull;
+  Map<String, dynamic>? get _proposedMediaAtEnd =>
+      _media.where((item) => item['slot'] == 'ccn_new_end_point').firstOrNull;
 
   bool get _routeReady =>
-      _mediaAtStart != null && _walkthrough != null && _mediaAtEnd != null;
+      _mediaAtStart != null &&
+      _walkthrough != null &&
+      _mediaAtEnd != null &&
+      _proposedMediaAtStart != null &&
+      _proposedWalkthrough != null &&
+      _proposedMediaAtEnd != null;
 
   String _segmentSelectionKey(TaskSegmentModel segment) =>
       segment.taskId?.trim().isNotEmpty == true
@@ -125,10 +144,63 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     return _deduplicatePoints(points);
   }
 
+  List<Map<String, dynamic>> get _proposedPreviewPoints {
+    final points = <Map<String, dynamic>>[];
+    final start = _proposedMediaAtStart?['location'];
+    if (start is Map) points.add(Map<String, dynamic>.from(start));
+    points.addAll(_proposedRoutePoints);
+    final end = _proposedMediaAtEnd?['location'];
+    if (end is Map) points.add(Map<String, dynamic>.from(end));
+    return _deduplicatePoints(points);
+  }
+
   List<Map<String, dynamic>> get _displayPoints =>
       _kmlChoice == 'uploaded' && _kmlArtifact?['previewPoints'] is List
       ? List<Map<String, dynamic>>.from(_kmlArtifact!['previewPoints'] as List)
-      : _previewPoints;
+      : _proposedPreviewPoints;
+
+  bool get _isProposedRouteApproved =>
+      _approvalStatus.toUpperCase() == 'APPROVED';
+
+  List<Map<String, dynamic>> get _existingRoutePoints {
+    final result = <Map<String, dynamic>>[];
+    for (final segment in _selectedSegmentPayload) {
+      final start = _coordinatePoint(
+        segment['startLatitude'],
+        segment['startLongitude'],
+      );
+      final end = _coordinatePoint(
+        segment['endLatitude'],
+        segment['endLongitude'],
+      );
+      if (start != null &&
+          (result.isEmpty || !_samePoint(result.last, start))) {
+        result.add(start);
+      }
+      if (end != null && (result.isEmpty || !_samePoint(result.last, end))) {
+        result.add(end);
+      }
+    }
+    return result;
+  }
+
+  Map<String, dynamic>? _coordinatePoint(Object? latitude, Object? longitude) {
+    final lat = double.tryParse(latitude?.toString() ?? '');
+    final lng = double.tryParse(longitude?.toString() ?? '');
+    if (lat == null ||
+        lng == null ||
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180) {
+      return null;
+    }
+    return {'latitude': lat, 'longitude': lng};
+  }
+
+  bool _samePoint(Map<String, dynamic> first, Map<String, dynamic> second) =>
+      first['latitude'] == second['latitude'] &&
+      first['longitude'] == second['longitude'];
 
   @override
   void initState() {
@@ -161,6 +233,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     _ownerId = user.id;
     _blockId = widget.hindrance['blockId']?.toString();
     _ringId = widget.hindrance['ringId']?.toString();
+    _routeGroupKey = widget.hindrance['routeGroupKey']?.toString();
     _segmentCodes.addAll(
       (widget.hindrance['affectedSegments'] as List? ?? const [])
           .whereType<Map>()
@@ -168,6 +241,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           .where((code) => code.isNotEmpty),
     );
     final cachedTasks = await _taskSource.loadCached(user.id);
+    PendingSyncManager.instance.restore(await _store.loadReports(user.id));
     if (!mounted) return;
     final now = DateTime.now().toUtc();
     final reportId = _uuid.v4();
@@ -180,7 +254,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       _tasksFromCache = cachedTasks.tasks.isNotEmpty;
       _loading = false;
     });
-    final initialBlock = _blocks.where((task) => task.id == _blockId).firstOrNull;
+    final initialBlock = _blocks
+        .where((task) => task.id == _blockId)
+        .firstOrNull;
     _circle = initialBlock?.circle;
     _district = initialBlock?.district;
     await _persist();
@@ -201,35 +277,53 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           tasks = tasks
               .map((task) => task.id == selected.id ? hierarchy : task)
               .toList();
+          await _taskSource.cacheBlockHierarchy(
+            ownerId: ownerId,
+            blockId: selected.id,
+            tasks: tasks,
+          );
         }
       }
       if (!mounted) return;
       setState(() {
         _tasks = tasks;
-        final selectedBlock = tasks.where((task) => task.id == _blockId).firstOrNull;
+        final selectedBlock = tasks
+            .where((task) => task.id == _blockId)
+            .firstOrNull;
         if (selectedBlock != null) {
           _circle = selectedBlock.circle;
           _district = selectedBlock.district;
         }
+        _restoreRouteGroupFromSelection();
         _cachedTasks = data.fromCache ? data.tasks : const [];
         _tasksFromCache = data.fromCache && data.tasks.isNotEmpty;
+        _hierarchyLoadError = null;
         _taskListHasMore = data.hasMore;
         _nextTaskPage = data.nextPage;
       });
-    } catch (_) {
-      // The account-scoped cached pack remains usable when the GET fails.
+    } catch (error) {
+      // Keep the account-scoped cached pack usable when the GET fails, and
+      // explain when this Block has never had its approved BoQ saved locally.
+      if (!mounted || _blockId == null) return;
+      final selected = _blocks.where((task) => task.id == _blockId).firstOrNull;
+      if (selected?.routeSnapshot?.routes.isNotEmpty != true) {
+        setState(() => _hierarchyLoadError = _hierarchyErrorMessage(error));
+      }
     }
   }
 
   Future<void> _selectBlock(String? blockId) async {
     final selected = _blocks.where((task) => task.id == blockId).firstOrNull;
+    final hasCachedRoutes = selected?.routeSnapshot?.routes.isNotEmpty == true;
     setState(() {
       _circle = selected?.circle;
       _district = selected?.district;
       _blockId = blockId;
       _ringId = null;
+      _routeGroupKey = null;
       _segmentCodes.clear();
-      _loadingHierarchy = selected != null;
+      _loadingHierarchy = selected != null && !hasCachedRoutes;
+      _hierarchyLoadError = null;
       _scheduleSave();
     });
     if (selected == null) return;
@@ -241,12 +335,34 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             .map((task) => task.id == blockId ? hierarchy : task)
             .toList();
         _loadingHierarchy = false;
+        _hierarchyLoadError = null;
       });
+      await _taskSource.cacheBlockHierarchy(
+        ownerId: _ownerId!,
+        blockId: blockId!,
+        tasks: _tasks,
+      );
     } catch (error) {
       if (!mounted || _blockId != blockId) return;
-      setState(() => _loadingHierarchy = false);
-      _showMessage('Could not load this Block’s approved BoQ: $error');
+      setState(() {
+        _loadingHierarchy = false;
+        _hierarchyLoadError = hasCachedRoutes
+            ? null
+            : _hierarchyErrorMessage(error);
+      });
     }
+  }
+
+  String _hierarchyErrorMessage(Object error) {
+    final message = error.toString().replaceFirst('Exception: ', '');
+    final normalized = message.toLowerCase();
+    if (normalized.contains('socketexception') ||
+        normalized.contains('failed host lookup') ||
+        normalized.contains('network is unreachable') ||
+        normalized.contains('connection timed out')) {
+      return 'No saved Ring data for this Block. Connect to the internet and select this Block to sync its approved BoQ for offline use.';
+    }
+    return message;
   }
 
   Future<void> _loadMoreTasks() async {
@@ -278,13 +394,22 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       .where((task) => task.id.isNotEmpty)
       .toList();
 
-  List<String> get _circles => (_blocks.map((block) => block.circle.trim())
-      .where((value) => value.isNotEmpty && value != 'N/A').toSet().toList()..sort());
+  List<String> get _circles =>
+      (_blocks
+          .map((block) => block.circle.trim())
+          .where((value) => value.isNotEmpty && value != 'N/A')
+          .toSet()
+          .toList()
+        ..sort());
 
-  List<String> get _districts => (_blocks
-      .where((block) => _circle == null || block.circle == _circle)
-      .map((block) => block.district.trim())
-      .where((value) => value.isNotEmpty && value != 'N/A').toSet().toList()..sort());
+  List<String> get _districts =>
+      (_blocks
+          .where((block) => _circle == null || block.circle == _circle)
+          .map((block) => block.district.trim())
+          .where((value) => value.isNotEmpty && value != 'N/A')
+          .toSet()
+          .toList()
+        ..sort());
 
   List<TaskModel> get _visibleBlocks => _blocks
       .where((block) => _circle == null || block.circle == _circle)
@@ -309,6 +434,14 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   }
 
   List<TaskSegmentModel> get _segments {
+    final group = _routeGroups
+        .where((candidate) => candidate.key == _routeGroupKey)
+        .firstOrNull;
+    if (_routeGroups.isNotEmpty) return group?.segments ?? const [];
+    return _ringSegments;
+  }
+
+  List<TaskSegmentModel> get _ringSegments {
     final ring = _selectedRing;
     if (ring == null) return const [];
     final explicitSegments =
@@ -324,6 +457,15 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 startLng: task.routeSnapshot?.segments.firstOrNull?.startLng,
                 targetLat: task.routeSnapshot?.segments.firstOrNull?.targetLat,
                 targetLng: task.routeSnapshot?.segments.firstOrNull?.targetLng,
+                groupStart:
+                    task.routeSnapshot?.segments.firstOrNull?.groupStart,
+                groupEnd: task.routeSnapshot?.segments.firstOrNull?.groupEnd,
+                groupStartId:
+                    task.routeSnapshot?.segments.firstOrNull?.groupStartId,
+                groupEndId:
+                    task.routeSnapshot?.segments.firstOrNull?.groupEndId,
+                sequenceNo:
+                    task.routeSnapshot?.segments.firstOrNull?.sequenceNo,
               ),
             )
             .toList();
@@ -338,6 +480,24 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           .toList();
     }
     return const [];
+  }
+
+  List<HindranceRouteGroup> get _routeGroups =>
+      HindranceTaskDataSource.routeGroupsForSegments(_ringSegments);
+
+  void _restoreRouteGroupFromSelection() {
+    if (_routeGroupKey != null &&
+        _routeGroups.any((group) => group.key == _routeGroupKey)) {
+      return;
+    }
+    if (_segmentCodes.isEmpty || _routeGroups.isEmpty) return;
+    final matches = _routeGroups.where((group) {
+      final codes = group.segments
+          .map((segment) => segment.segmentCode)
+          .toSet();
+      return _segmentCodes.every(codes.contains);
+    }).toList();
+    _routeGroupKey = matches.length == 1 ? matches.single.key : null;
   }
 
   String _taskName(TaskModel? task, String? fallback) {
@@ -357,7 +517,12 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   }
 
   Future<void> _continueFromHierarchy() async {
-    if (_blockId == null || _ringId == null || _segmentCodes.isEmpty) return;
+    if (_blockId == null ||
+        _ringId == null ||
+        _segmentCodes.isEmpty ||
+        (_routeGroups.isNotEmpty && _routeGroupKey == null)) {
+      return;
+    }
     final ownerId = _ownerId;
     if (ownerId != null) {
       final hasCachedPack = _cachedTasks.any((task) => task.id == _blockId);
@@ -406,15 +571,26 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       _selectedRing,
       widget.hindrance['ringName']?.toString(),
     ),
+    'routeGroupKey': _routeGroupKey,
+    'routeGroupName': _routeGroups
+        .where((group) => group.key == _routeGroupKey)
+        .map((group) => group.label)
+        .firstOrNull,
     'affectedSegments': _selectedSegmentPayload,
     'category': _category,
     'subtype': _subtype,
     'description': _description.text,
-    'quantityRows': _quantityRows
-        .map((row) => Map<String, String>.from(row))
-        .toList(),
     'media': List<Map<String, dynamic>>.from(_media),
     'routePoints': _routePoints,
+    'proposedRoutePoints': _proposedRoutePoints,
+    'existingRouteEvidence': _media
+        .where(
+          (item) =>
+              (item['slot']?.toString() ?? '').startsWith('ccn_') &&
+              !(item['slot']?.toString() ?? '').startsWith('ccn_new_'),
+        )
+        .toList(),
+    'routeApprovalStatus': _approvalStatus,
     'kmlChoice': _kmlChoice,
     'kmlArtifact': _kmlArtifact,
     'queueState': state ?? 'LOCAL_SAVED',
@@ -448,6 +624,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         ownerId: _ownerId!,
         reportId: _reportId!,
         slot: 'ccn_$slot',
+        recordType: 'CCN',
+        createdAt: DateTime.tryParse(_createdAt ?? ''),
       );
       if (media != null && mounted) {
         setState(() {
@@ -469,7 +647,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     var trackingStarted = false;
     List<Map<String, dynamic>> trace = [];
     try {
-      if (slot == 'walkthrough') {
+      if (slot.contains('walkthrough')) {
         try {
           await _routeRecorder.start();
           trackingStarted = true;
@@ -478,7 +656,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         }
       }
       Map<String, dynamic>? media;
-      if (slot == 'walkthrough') {
+      if (slot.contains('walkthrough')) {
         final captureLocation = await _mediaService.getFreshLocation();
         if (!mounted) return;
         final recorded = await Navigator.of(context).push<RecordedCcnVideo>(
@@ -495,6 +673,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             slot: 'ccn_$slot',
             duration: recorded.duration,
             maxDuration: maxDuration,
+            recordType: 'CCN',
+            createdAt: DateTime.tryParse(_createdAt ?? ''),
           );
         }
       } else {
@@ -503,6 +683,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           reportId: _reportId!,
           slot: 'ccn_$slot',
           maxDuration: maxDuration,
+          recordType: 'CCN',
+          createdAt: DateTime.tryParse(_createdAt ?? ''),
         );
       }
       if (trackingStarted) trace = await _routeRecorder.stop();
@@ -513,6 +695,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         setState(() {
           _media.add(capturedMedia);
           if (slot == 'walkthrough') _routePoints = trace;
+          if (slot == 'new_walkthrough') _proposedRoutePoints = trace;
           _invalidateKml();
         });
         await _persist();
@@ -536,6 +719,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         'ccn_additional_photo',
         'ccn_endpoint_video',
       },
+      'ccn_new_start_point' => {'ccn_new_walkthrough', 'ccn_new_end_point'},
+      'ccn_new_walkthrough' => {'ccn_new_end_point'},
       'ccn_walkthrough' => {
         'ccn_additional_video',
         'ccn_end_point',
@@ -551,6 +736,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         )
         .toList();
     for (final media in removed) {
+      await _mediaService.deleteFileManagerCopy(media);
       if ((media['storage'] == 'indexeddb' || media['storage'] == 'database') &&
           media['mediaId'] != null) {
         await _store.deleteMediaBytes(media['mediaId'].toString());
@@ -563,8 +749,12 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     setState(() {
       _media.removeWhere(removed.contains);
       if (slot == 'ccn_walkthrough') _routePoints.clear();
+      if (slot == 'ccn_new_walkthrough') _proposedRoutePoints.clear();
       if (slot == 'ccn_start_point' || slot == 'ccn_walkthrough') {
         _routePoints.clear();
+      }
+      if (slot == 'ccn_new_start_point' || slot == 'ccn_new_walkthrough') {
+        _proposedRoutePoints.clear();
       }
       _invalidateKml();
     });
@@ -575,6 +765,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     final existingIndex = _media.indexWhere((m) => m['slot'] == slot);
     if (existingIndex != -1) {
       final oldMedia = _media[existingIndex];
+      await _mediaService.deleteFileManagerCopy(oldMedia);
       final mediaId = oldMedia['mediaId']?.toString();
       final path = oldMedia['path']?.toString();
       if (oldMedia['storage'] == 'indexeddb' && mediaId != null) {
@@ -591,7 +782,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         _media.removeAt(existingIndex);
       });
     }
-    if (slot.contains('video') || slot == 'walkthrough') {
+    if (slot.contains('video') ||
+        slot.contains('walkthrough') ||
+        slot.endsWith('end_point')) {
       await _captureVideo(slot, duration ?? const Duration(minutes: 5));
     } else {
       await _capturePhoto(slot);
@@ -599,17 +792,21 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   }
 
   void _invalidateKml() {
-    final mediaId = _kmlArtifact?['mediaId']?.toString();
+    final previous = _kmlArtifact;
+    final mediaId = previous?['mediaId']?.toString();
     _kmlArtifact = null;
     _kmlChoice = 'generated';
     if (mediaId != null) unawaited(_store.deleteMediaBytes(mediaId));
+    if (previous != null) {
+      unawaited(_mediaService.deleteFileManagerCopy(previous));
+    }
   }
 
   Future<void> _useGeneratedKml() async {
     try {
       final text = HindranceKml.build(
         name: _ccnId ?? 'CCN route',
-        routePoints: _previewPoints,
+        routePoints: _proposedPreviewPoints,
       );
       final artifact = await _mediaService.storePickedBytes(
         ownerId: _ownerId!,
@@ -617,15 +814,23 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         filename: '${_ccnId ?? 'route'}.kml',
         kind: 'kml',
         bytes: Uint8List.fromList(utf8.encode(text)),
+        recordType: 'CCN',
+        createdAt: DateTime.tryParse(_createdAt ?? ''),
       );
-      artifact['previewPoints'] = _previewPoints;
+      artifact['previewPoints'] = _proposedPreviewPoints;
       artifact['source'] = 'generated_from_captured_gps';
-      final previousId = _kmlArtifact?['mediaId']?.toString();
+      final previousArtifact = _kmlArtifact;
+      final previousId = previousArtifact?['mediaId']?.toString();
       setState(() {
         _kmlArtifact = artifact;
         _kmlChoice = 'generated';
       });
-      if (previousId != null) await _store.deleteMediaBytes(previousId);
+      if (previousId != null) {
+        await _store.deleteMediaBytes(previousId);
+      }
+      if (previousArtifact != null) {
+        await _mediaService.deleteFileManagerCopy(previousArtifact);
+      }
       await _persist();
     } catch (error) {
       _showMessage(error.toString().replaceFirst('FormatException: ', ''));
@@ -654,15 +859,21 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         filename: file.name,
         kind: 'kml',
         bytes: bytes,
+        recordType: 'CCN',
+        createdAt: DateTime.tryParse(_createdAt ?? ''),
       );
       artifact['previewPoints'] = points;
       artifact['source'] = 'uploaded_kml';
-      final previousId = _kmlArtifact?['mediaId']?.toString();
+      final previousArtifact = _kmlArtifact;
+      final previousId = previousArtifact?['mediaId']?.toString();
       setState(() {
         _kmlArtifact = artifact;
         _kmlChoice = 'uploaded';
       });
       if (previousId != null) await _store.deleteMediaBytes(previousId);
+      if (previousArtifact != null) {
+        await _mediaService.deleteFileManagerCopy(previousArtifact);
+      }
       await _persist();
     } catch (error) {
       _showMessage('Could not read this KML: ${error.toString()}');
@@ -672,7 +883,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   Future<void> _submit() async {
     if (!_routeReady) {
       _showMessage(
-        'Capture the start photo, walkthrough video, and end photo first.',
+        'Capture both route sets: existing start photo, walkthrough video and end-point video, then the proposed start photo, walkthrough video and end-point video.',
       );
       return;
     }
@@ -687,58 +898,167 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       _showMessage('Select a Block, Ring, and at least one segment first.');
       return;
     }
+    final ownerId = _ownerId;
+    final reportId = _reportId;
+    if (ownerId == null || reportId == null) {
+      _showMessage('Save this CCN on the device before submitting.');
+      return;
+    }
+    if (PendingSyncManager.instance.isActive(reportId)) return;
+    final linkedReportId = widget.hindrance['reportId']?.toString();
     setState(() => _saving = true);
     try {
-      final pendingSaved = await _persist(state: 'PENDING_API');
-      if (!pendingSaved || !mounted) return;
-      final taskId = await _submissionService.submitCcn(
-        block: block,
-        ring: ring,
-        segments: segments,
-        report: _payload(),
-        existingTaskId: _serverTaskId,
-        onTaskCreated: (createdTaskId) async {
-          if (!mounted) return;
-          setState(() {
-            _serverTaskId = createdTaskId;
-            _ccnId = createdTaskId;
-          });
-          final createdSaved = await _persist(state: 'CREATED');
-          if (!createdSaved) {
-            throw StateError(
-              'The CCN task was created but its ID could not be saved on this device. Keep this ID for recovery: $createdTaskId',
+      var totalBytes = 0;
+      for (final item in _media) {
+        final size = await _savedFileSize(item);
+        item['sizeBytes'] = size;
+        totalBytes += size;
+      }
+      final createdAt =
+          DateTime.tryParse(_createdAt ?? '') ?? DateTime.now().toUtc();
+      final report = _payload(state: 'PENDING_SYNC')
+        ..['syncBytesTotal'] = totalBytes
+        ..['syncBytesSent'] = 0
+        ..['syncError'] = null;
+      report['createdAt'] = createdAt.toIso8601String();
+      report['queueState'] = 'PENDING_SYNC';
+      await _store.saveReport(
+        reportId: reportId,
+        ownerId: ownerId,
+        state: 'PENDING_SYNC',
+        payload: report,
+        createdAt: createdAt,
+      );
+      if (!mounted) return;
+      PendingSyncManager.instance.start(
+        id: reportId,
+        formType: 'CCN',
+        totalBytes: totalBytes,
+        files: _media
+            .map(PendingSyncManager.fileLabel)
+            .toList(),
+        run: (onBytesSent) async {
+          var sentBytes = _media
+              .where((item) => item['uploadKey'] != null)
+              .fold<int>(
+                0,
+                (sum, item) =>
+                    sum +
+                    (int.tryParse(item['sizeBytes']?.toString() ?? '') ?? 0),
+              );
+          var lastPersistedBytes = sentBytes;
+          report['syncBytesSent'] = sentBytes;
+          Future<void> checkpoint(String state) async {
+            report['queueState'] = state;
+            report['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+            await _store.saveReport(
+              reportId: reportId,
+              ownerId: ownerId,
+              state: state,
+              payload: report,
+              createdAt: createdAt,
             );
+          }
+
+          try {
+            if (sentBytes > 0) {
+              await onBytesSent(sentBytes);
+              await checkpoint('SYNCING');
+            }
+            final taskId = await _submissionService.submitCcn(
+              block: block,
+              ring: ring,
+              segments: segments,
+              report: report,
+              existingTaskId: _serverTaskId,
+              onTaskCreated: (createdTaskId) async {
+                report
+                  ..['serverTaskId'] = createdTaskId
+                  ..['ccnId'] = createdTaskId;
+                await checkpoint('SYNCING');
+              },
+              onUploadBytes: (count) async {
+                sentBytes += count;
+                await onBytesSent(count);
+                if (sentBytes - lastPersistedBytes >= 1024 * 1024 ||
+                    sentBytes >= totalBytes) {
+                  report['syncBytesSent'] = sentBytes;
+                  lastPersistedBytes = sentBytes;
+                  await checkpoint('SYNCING');
+                }
+              },
+            );
+            report
+              ..['serverTaskId'] = taskId
+              ..['ccnId'] = taskId
+              ..['syncBytesSent'] = totalBytes
+              ..['syncError'] = null;
+            await checkpoint('SUBMITTED');
+            await _markLinkedHindranceCcnSubmitted(
+              ownerId,
+              taskId,
+              linkedReportId,
+            );
+          } catch (error) {
+            report['syncError'] = error.toString();
+            report['syncBytesSent'] = sentBytes;
+            await checkpoint('SYNC_FAILED');
+            rethrow;
           }
         },
       );
       if (!mounted) return;
-      setState(() {
-        _serverTaskId = taskId;
-        _ccnId = taskId;
-      });
-      final submittedSaved = await _persist(state: 'SUBMITTED');
-      if (!submittedSaved || !mounted) return;
-      final hasLocalOnlyEvidence =
-          _media.any((item) => item['kind'] != 'photo') || _kmlArtifact != null;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            hasLocalOnlyEvidence
-                ? 'CCN submitted for review. Photo evidence was uploaded; video and KML remain saved locally. Task ID: $taskId'
-                : 'CCN submitted for review. Task ID: $taskId',
-          ),
-        ),
-      );
-      Navigator.of(
-        context,
-      ).pop({'ccnId': taskId, 'serverTaskId': taskId, 'reportId': _reportId});
+      setState(() => _saving = false);
+      Navigator.of(context).pop({'queued': true, 'reportId': reportId});
     } catch (error) {
       if (mounted) {
+        setState(() => _saving = false);
         _showMessage(error.toString().replaceFirst('Exception: ', ''));
       }
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<int> _savedFileSize(Map item) async {
+    final knownSize = int.tryParse(item['sizeBytes']?.toString() ?? '');
+    if (knownSize != null && knownSize > 0) return knownSize;
+    final mediaId = item['mediaId']?.toString();
+    if (mediaId != null &&
+        (item['storage'] == 'indexeddb' || item['storage'] == 'database')) {
+      return (await _store.loadMediaBytes(mediaId))?.length ?? 0;
+    }
+    final path = item['path']?.toString();
+    if (path != null && path.isNotEmpty && !kIsWeb) {
+      final file = File(path);
+      if (await file.exists()) return file.length();
+    }
+    return 0;
+  }
+
+  Future<void> _markLinkedHindranceCcnSubmitted(
+    String ownerId,
+    String ccnId,
+    String? linkedReportId,
+  ) async {
+    if (linkedReportId == null || linkedReportId.isEmpty) return;
+    final reports = await _store.loadReports(ownerId);
+    final linked = reports
+        .where((item) => item['reportId'] == linkedReportId)
+        .firstOrNull;
+    if (linked == null) return;
+    linked
+      ..['ccnRequired'] = true
+      ..['ccnId'] = ccnId
+      ..['workflowStage'] = 'completed'
+      ..['queueState'] = 'SUBMITTED';
+    await _store.saveReport(
+      reportId: linkedReportId,
+      ownerId: ownerId,
+      state: 'SUBMITTED',
+      payload: linked,
+      createdAt:
+          DateTime.tryParse(linked['createdAt']?.toString() ?? '') ??
+          DateTime.now().toUtc(),
+    );
   }
 
   List<Map<String, dynamic>> _deduplicatePoints(
@@ -791,6 +1111,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           backgroundColor: AppColors.headerGreen,
           foregroundColor: Colors.white,
           actions: [
+            const PendingSyncAction(),
             IconButton(
               tooltip: 'Saved offline CCNs',
               onPressed: _ownerId == null ? null : _showSavedReports,
@@ -829,7 +1150,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                       onPressed:
                           _blockId == null ||
                               _ringId == null ||
-                              _segmentCodes.isEmpty
+                              _segmentCodes.isEmpty ||
+                              (_routeGroups.isNotEmpty &&
+                                  _routeGroupKey == null)
                           ? null
                           : _continueFromHierarchy,
                       icon: const Icon(Icons.arrow_forward),
@@ -891,13 +1214,19 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             initialValue: _circles.contains(_circle) ? _circle : null,
             decoration: const InputDecoration(labelText: 'Circle'),
             isExpanded: true,
-            items: _circles.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
+            items: _circles
+                .map(
+                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                )
+                .toList(),
             onChanged: (value) => setState(() {
               _circle = value;
               _district = null;
               _blockId = null;
               _ringId = null;
+              _routeGroupKey = null;
               _segmentCodes.clear();
+              _hierarchyLoadError = null;
               _hierarchyConfirmed = false;
               _scheduleSave();
             }),
@@ -908,12 +1237,18 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             initialValue: _districts.contains(_district) ? _district : null,
             decoration: const InputDecoration(labelText: 'District'),
             isExpanded: true,
-            items: _districts.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
+            items: _districts
+                .map(
+                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                )
+                .toList(),
             onChanged: (value) => setState(() {
               _district = value;
               _blockId = null;
               _ringId = null;
+              _routeGroupKey = null;
               _segmentCodes.clear();
+              _hierarchyLoadError = null;
               _hierarchyConfirmed = false;
               _scheduleSave();
             }),
@@ -956,14 +1291,76 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 ? null
                 : (ringId) => setState(() {
                     _ringId = ringId;
+                    _routeGroupKey = null;
                     _segmentCodes.clear();
                     _scheduleSave();
                   }),
           ),
+          if (_routeGroups.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              key: ValueKey('ccn-route-group-$_ringId-$_routeGroupKey'),
+              initialValue:
+                  _routeGroups.any((group) => group.key == _routeGroupKey)
+                  ? _routeGroupKey
+                  : null,
+              decoration: const InputDecoration(labelText: 'Route'),
+              hint: const Text('Select a GP route'),
+              isExpanded: true,
+              items: _routeGroups
+                  .map(
+                    (group) => DropdownMenuItem(
+                      value: group.key,
+                      child: Text(
+                        '${group.label} · ${group.segments.length} segments · '
+                        '${group.segments.fold<double>(0, (sum, segment) => sum + segment.distanceKm).toStringAsFixed(2)} km',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (key) => setState(() {
+                _routeGroupKey = key;
+                _segmentCodes.clear();
+                _scheduleSave();
+              }),
+            ),
+          ],
           if (_loadingHierarchy)
             const Padding(
               padding: EdgeInsets.only(top: 8),
               child: LinearProgressIndicator(),
+            ),
+          if (_hierarchyLoadError != null)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7ED),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFED7AA)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    size: 18,
+                    color: Color(0xFFB45309),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _hierarchyLoadError!,
+                      style: const TextStyle(
+                        color: Color(0xFF7C2D12),
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           const SizedBox(height: 14),
           const Text(
@@ -997,7 +1394,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           if (segments.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 8),
-              child: Text('Select a Ring with available Segment data.'),
+              child: Text(
+                'Select a Ring and Route with available Segment data.',
+              ),
             ),
           if (segments.isNotEmpty)
             SizedBox(
@@ -1042,6 +1441,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     final start = _mediaAtStart;
     final walkthrough = _walkthrough;
     final end = _mediaAtEnd;
+    final proposedStart = _proposedMediaAtStart;
+    final proposedWalkthrough = _proposedWalkthrough;
+    final proposedEnd = _proposedMediaAtEnd;
     final startExtras = _media
         .where((item) => item['slot'] == 'ccn_start_photo')
         .toList();
@@ -1115,6 +1517,11 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           ),
         ]),
         _section('Route Evidence', [
+          const Text(
+            'Existing approved route evidence',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
           _captureStep(
             'Start Point',
             'Capture Start Photo',
@@ -1166,12 +1573,13 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           ),
           const SizedBox(height: 14),
           _captureStep(
-            'End Point',
-            'Capture End Photo',
+            'End Point Video',
+            'Capture End-Point Video',
             end,
             slot: 'end_point',
             enabled: !_saving && end == null,
-            onPressed: () => _capturePhoto('end_point'),
+            onPressed: () =>
+                _captureVideo('end_point', const Duration(minutes: 3)),
           ),
           const SizedBox(height: 12),
           const Text(
@@ -1203,12 +1611,68 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             label: Text('Add endpoint video (${endpointVideos.length}/2)'),
           ),
         ]),
+        _section('New Route Proposal', [
+          const Text(
+            'Capture the proposed alignment separately. Its GPS trace is shown as a grey dotted line until it is approved.',
+          ),
+          const SizedBox(height: 10),
+          _captureStep(
+            'Proposed Start Point',
+            'Capture Proposed Start Photo',
+            proposedStart,
+            slot: 'new_start_point',
+            enabled: !_saving && proposedStart == null,
+            onPressed: () => _capturePhoto('new_start_point'),
+          ),
+          const SizedBox(height: 12),
+          _captureStep(
+            'Proposed Route Walk Video · up to 5 minutes',
+            'Capture Proposed Route Video',
+            proposedWalkthrough,
+            slot: 'new_walkthrough',
+            enabled: !_saving && proposedWalkthrough == null,
+            onPressed: () =>
+                _captureVideo('new_walkthrough', const Duration(minutes: 5)),
+            helper:
+                'GPS is sampled during this video for the proposed alignment.',
+          ),
+          const SizedBox(height: 12),
+          _captureStep(
+            'Proposed End Point Video',
+            'Capture Proposed End-Point Video',
+            proposedEnd,
+            slot: 'new_end_point',
+            enabled: !_saving && proposedEnd == null,
+            onPressed: () =>
+                _captureVideo('new_end_point', const Duration(minutes: 3)),
+          ),
+        ]),
         if (_routeReady)
           HindranceRoutePreview(
-            points: _displayPoints,
+            existingPoints: _previewPoints.length > 1
+                ? _previewPoints
+                : _existingRoutePoints,
+            proposedPoints: _displayPoints,
+            proposedRouteApproved: _isProposedRouteApproved,
             title: _kmlArtifact == null
-                ? 'Captured GPS route'
+                ? 'Existing and proposed routes'
                 : 'KML route preview',
+          ),
+        if (_serverTaskId?.isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.fact_check_outlined, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Route review status: $_approvalStatus')),
+                IconButton(
+                  tooltip: 'Refresh review status',
+                  onPressed: _saving ? null : _refreshApprovalStatus,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
           ),
         _section('KML Route File', [
           const Text(
@@ -1240,8 +1704,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
               title: Text(
                 (_kmlArtifact!['filename'] ?? 'route.kml').toString(),
               ),
-              subtitle: const Text(
-                'Saved on this device · upload waits for API integration',
+              subtitle: Text(
+                _kmlArtifact?['fileManagerFolder']?.toString() ??
+                    'Saved on this device · upload waits for API integration',
               ),
               trailing: IconButton(
                 tooltip: 'Remove KML',
@@ -1257,76 +1722,6 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 icon: const Icon(Icons.close),
               ),
             ),
-        ]),
-        _section('Scope Quantities', [
-          const Text(
-            'Enter the values shown in the CCN reference table. Totals are calculated locally.',
-          ),
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columnSpacing: 12,
-              horizontalMargin: 8,
-              columns: [
-                const DataColumn(label: Text('#')),
-                ...ccnQuantityColumns.map(
-                  (column) => DataColumn(label: Text(column)),
-                ),
-                const DataColumn(label: Text('Total')),
-              ],
-              rows: List.generate(_quantityRows.length, (index) {
-                final row = _quantityRows[index];
-                final total = ccnQuantityColumns.fold<int>(
-                  0,
-                  (sum, key) => sum + (int.tryParse(row[key] ?? '') ?? 0),
-                );
-                return DataRow(
-                  cells: [
-                    DataCell(Text('${index + 1}')),
-                    ...ccnQuantityColumns.map(
-                      (key) => DataCell(
-                        SizedBox(
-                          width: 56,
-                          child: TextFormField(
-                            initialValue: row[key],
-                            keyboardType: TextInputType.number,
-                            textAlign: TextAlign.center,
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              hintText: '0',
-                            ),
-                            onChanged: (value) {
-                              row[key] = value;
-                              setState(() {});
-                              _scheduleSave();
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                    DataCell(
-                      Text(
-                        '$total',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
-                );
-              }),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () {
-                setState(() => _quantityRows.add({}));
-                _scheduleSave();
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Add row'),
-            ),
-          ),
         ]),
         const _OfflineInfo(),
       ],
@@ -1382,6 +1777,11 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   }
 
   void _resumeReport(Map<String, dynamic> report) {
+    final reportId = report['reportId']?.toString() ?? '';
+    if (PendingSyncManager.instance.isActive(reportId)) {
+      _showMessage('This CCN is syncing. Check Pending sync for progress.');
+      return;
+    }
     setState(() {
       _reportId = report['reportId']?.toString();
       _ccnId = report['ccnId']?.toString();
@@ -1389,6 +1789,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       _createdAt = report['createdAt']?.toString();
       _category = report['category']?.toString();
       _subtype = report['subtype']?.toString();
+      _approvalStatus = report['routeApprovalStatus']?.toString() ?? 'PENDING';
       _description.text = report['description']?.toString() ?? '';
       _media
         ..clear()
@@ -1401,6 +1802,11 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           .whereType<Map>()
           .map(Map<String, dynamic>.from)
           .toList();
+      _proposedRoutePoints =
+          (report['proposedRoutePoints'] as List? ?? const [])
+              .whereType<Map>()
+              .map(Map<String, dynamic>.from)
+              .toList();
       _kmlChoice = report['kmlChoice']?.toString() ?? 'generated';
       _kmlArtifact = report['kmlArtifact'] is Map
           ? Map<String, dynamic>.from(report['kmlArtifact'] as Map)
@@ -1413,6 +1819,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           savedHindrance['blockId']?.toString();
       _ringId =
           report['ringId']?.toString() ?? savedHindrance['ringId']?.toString();
+      _routeGroupKey =
+          report['routeGroupKey']?.toString() ??
+          savedHindrance['routeGroupKey']?.toString();
       _segmentCodes
         ..clear()
         ..addAll(
@@ -1425,19 +1834,30 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         );
       _hierarchyConfirmed =
           _blockId != null && _ringId != null && _segmentCodes.isNotEmpty;
-      _quantityRows
-        ..clear()
-        ..addAll(
-          (report['quantityRows'] as List? ?? const []).whereType<Map>().map(
-            (row) => Map<String, String>.from(
-              row.map(
-                (key, value) => MapEntry(key.toString(), value.toString()),
-              ),
-            ),
-          ),
-        );
-      if (_quantityRows.isEmpty) _quantityRows.add({});
     });
+    if (_serverTaskId?.isNotEmpty == true) {
+      unawaited(_refreshApprovalStatus());
+    }
+  }
+
+  Future<void> _refreshApprovalStatus() async {
+    final taskId = _serverTaskId;
+    if (taskId == null || taskId.isEmpty) return;
+    try {
+      final task = await _taskApi.fetchTaskDetails(taskId);
+      final approval = task.approvalStatus.trim().toUpperCase();
+      final taskStatus = task.status.trim().toUpperCase();
+      final status = approval.isNotEmpty && approval != 'UNKNOWN'
+          ? approval
+          : taskStatus == 'APPROVED'
+          ? 'APPROVED'
+          : 'PENDING';
+      if (!mounted || status == _approvalStatus) return;
+      setState(() => _approvalStatus = status);
+      await _persist();
+    } catch (_) {
+      // Keep the last server-confirmed state if the review endpoint is offline.
+    }
   }
 
   Widget _section(String title, List<Widget> children) => HindranceGlassSurface(
@@ -1766,6 +2186,21 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (record['fileManagerFolder'] != null ||
+                            record['fileManagerExportError'] != null)
+                          Text(
+                            record['fileManagerExportError'] != null
+                                ? 'File manager copy failed'
+                                : 'Files: ${record['fileManagerFolder']}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: record['fileManagerExportError'] != null
+                                  ? Colors.red
+                                  : Colors.black54,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                       ],
                     ),
                   ),
@@ -1979,7 +2414,7 @@ class _OfflineInfo extends StatelessWidget {
         SizedBox(width: 10),
         Expanded(
           child: Text(
-            'CCN data, evidence, route points, and KML are saved locally. API and S3 upload will be connected later.',
+            'Drafts save on this device. When online, Submit CCN creates and submits the task and uploads photos. Walkthrough video, route points, and KML remain on this device.',
             style: TextStyle(fontSize: 12),
           ),
         ),

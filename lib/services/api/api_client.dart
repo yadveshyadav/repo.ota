@@ -10,15 +10,14 @@ class ApiClient {
   final http.Client _client;
   String? _authToken;
 
-  ApiClient({
-    String? baseUrl,
-    http.Client? client,
-  })  : baseUrl = baseUrl ??
-            const String.fromEnvironment(
-              'API_BASE_URL',
-              defaultValue: AppConstants.defaultBaseUrl,
-            ),
-        _client = client ?? http.Client();
+  ApiClient({String? baseUrl, http.Client? client})
+    : baseUrl =
+          baseUrl ??
+          const String.fromEnvironment(
+            'API_BASE_URL',
+            defaultValue: AppConstants.defaultBaseUrl,
+          ),
+      _client = client ?? http.Client();
 
   String? get authToken => _authToken;
 
@@ -34,7 +33,9 @@ class ApiClient {
     if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
       return Uri.parse(endpoint);
     }
-    final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final cleanBase = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
     var cleanEp = endpoint.startsWith('/') ? endpoint : '/$endpoint';
 
     // Django APPEND_SLASH safety: ensure endpoints without query params end with trailing slash '/'
@@ -77,7 +78,9 @@ class ApiClient {
 
   Future<dynamic> get(String endpoint, {int redirectCount = 0}) async {
     if (redirectCount > 3) {
-      throw Exception('Too many HTTP redirects (301/302/307/308) while contacting server.');
+      throw Exception(
+        'Too many HTTP redirects (301/302/307/308) while contacting server.',
+      );
     }
     final uri = _buildUri(endpoint);
     try {
@@ -98,7 +101,9 @@ class ApiClient {
       return _processResponse(response);
     } catch (e) {
       if (e.toString().contains('TimeoutException')) {
-        throw Exception('Server connection timed out. Please check your network or try again.');
+        throw Exception(
+          'Server connection timed out. Please check your network or try again.',
+        );
       }
       rethrow;
     }
@@ -111,12 +116,16 @@ class ApiClient {
     int redirectCount = 0,
   }) async {
     if (redirectCount > 3) {
-      throw Exception('Too many HTTP redirects (301/302/307/308) while contacting server.');
+      throw Exception(
+        'Too many HTTP redirects (301/302/307/308) while contacting server.',
+      );
     }
     final uri = _buildUri(endpoint);
     try {
       final reqHeaders = Map<String, String>.from(_headers);
-      if (isPublic || endpoint.contains('/auth/login') || endpoint.contains('/auth/register')) {
+      if (isPublic ||
+          endpoint.contains('/auth/login') ||
+          endpoint.contains('/auth/register')) {
         reqHeaders.remove('Authorization');
       }
       final response = await _client
@@ -145,7 +154,9 @@ class ApiClient {
       return _processResponse(response);
     } catch (e) {
       if (e.toString().contains('TimeoutException')) {
-        throw Exception('Server connection timed out. Please check your network or try again.');
+        throw Exception(
+          'Server connection timed out. Please check your network or try again.',
+        );
       }
       rethrow;
     }
@@ -157,7 +168,9 @@ class ApiClient {
     int redirectCount = 0,
   }) async {
     if (redirectCount > 3) {
-      throw Exception('Too many HTTP redirects (301/302/307/308) while contacting server.');
+      throw Exception(
+        'Too many HTTP redirects (301/302/307/308) while contacting server.',
+      );
     }
     final uri = _buildUri(endpoint);
     try {
@@ -187,7 +200,9 @@ class ApiClient {
       return _processResponse(response);
     } catch (e) {
       if (e.toString().contains('TimeoutException')) {
-        throw Exception('Server connection timed out. Please check your network or try again.');
+        throw Exception(
+          'Server connection timed out. Please check your network or try again.',
+        );
       }
       rethrow;
     }
@@ -198,32 +213,47 @@ class ApiClient {
     String uploadUrl,
     List<int> bytes, {
     String contentType = 'image/jpeg',
+    Future<void> Function(int bytesSent)? onBytesSent,
   }) async {
     final uri = Uri.parse(uploadUrl);
-    final headers = <String, String>{
-      'Content-Type': contentType,
-    };
     try {
       if (kDebugMode) {
         // Presigned URLs contain temporary credentials; never write them to logs.
         print('[ApiClient] Uploading ${bytes.length} bytes via presigned PUT.');
       }
-      final response = await _client
-          .put(uri, headers: headers, body: bytes)
-          // Video evidence can be large and the tablet may be on a slow mobile
-          // connection. Keep the signed URL alive for a realistic upload window.
+      final request = http.StreamedRequest('PUT', uri)
+        ..headers['Content-Type'] = contentType
+        ..contentLength = bytes.length;
+      // Start consuming while chunks are queued so the UI progress reflects
+      // bytes handed to the HTTP transport instead of only file completions.
+      final responseFuture = _client
+          .send(request)
           .timeout(const Duration(minutes: 2));
+      const chunkSize = 64 * 1024;
+      for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+        final end = (offset + chunkSize).clamp(0, bytes.length);
+        request.sink.add(bytes.sublist(offset, end));
+        await onBytesSent?.call(end - offset);
+      }
+      await request.sink.close();
+      final response = await http.Response.fromStream(await responseFuture);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         if (kDebugMode) {
-          print('[ApiClient] Raw bytes PUT failed [${response.statusCode}]: ${response.body}');
+          print(
+            '[ApiClient] Raw bytes PUT failed [${response.statusCode}]: ${response.body}',
+          );
         }
-        throw Exception('Failed to upload media [${response.statusCode}]: ${response.reasonPhrase}');
+        throw Exception(
+          'Failed to upload media [${response.statusCode}]: ${response.reasonPhrase}',
+        );
       }
       return response;
     } catch (e) {
       if (e.toString().contains('TimeoutException')) {
-        throw Exception('Media upload timed out. Please check your connection and try again.');
+        throw Exception(
+          'Media upload timed out. Please check your connection and try again.',
+        );
       }
       rethrow;
     }
@@ -237,7 +267,9 @@ class ApiClient {
     int redirectCount = 0,
   }) async {
     if (redirectCount > 3) {
-      throw Exception('Too many HTTP redirects (301/302/307/308) during file upload.');
+      throw Exception(
+        'Too many HTTP redirects (301/302/307/308) during file upload.',
+      );
     }
     final uri = _buildUri(endpoint);
     try {
@@ -256,14 +288,18 @@ class ApiClient {
         request.files.addAll(files);
       }
 
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 20));
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 20),
+      );
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode >= 300 && response.statusCode < 400) {
         final redirectUrl = response.headers['location'];
         if (redirectUrl != null && redirectUrl.isNotEmpty) {
           if (kDebugMode) {
-            print('[ApiClient] Multipart POST [301 Redirect] from $uri to $redirectUrl');
+            print(
+              '[ApiClient] Multipart POST [301 Redirect] from $uri to $redirectUrl',
+            );
           }
           return await postMultipart(
             redirectUrl,
@@ -296,11 +332,14 @@ class ApiClient {
     } else {
       String errorMessage = response.reasonPhrase ?? 'Server Error';
       if (decodedBody is Map<String, dynamic>) {
-        if (decodedBody.containsKey('detail') && decodedBody['detail'] != null) {
+        if (decodedBody.containsKey('detail') &&
+            decodedBody['detail'] != null) {
           errorMessage = decodedBody['detail'].toString();
-        } else if (decodedBody.containsKey('message') && decodedBody['message'] != null) {
+        } else if (decodedBody.containsKey('message') &&
+            decodedBody['message'] != null) {
           errorMessage = decodedBody['message'].toString();
-        } else if (decodedBody.containsKey('error') && decodedBody['error'] != null) {
+        } else if (decodedBody.containsKey('error') &&
+            decodedBody['error'] != null) {
           errorMessage = decodedBody['error'].toString();
         } else {
           final fieldErrors = <String>[];
@@ -320,11 +359,15 @@ class ApiClient {
       }
 
       if (kDebugMode) {
-        print('[ApiClient] API Error [${response.statusCode}] on ${response.request?.url}: $errorMessage');
+        print(
+          '[ApiClient] API Error [${response.statusCode}] on ${response.request?.url}: $errorMessage',
+        );
       }
 
       if (response.statusCode == 401) {
-        throw Exception('Unauthorized [401]: Session expired or invalid token.');
+        throw Exception(
+          'Unauthorized [401]: Session expired or invalid token.',
+        );
       } else if (response.statusCode == 403) {
         throw Exception('Forbidden [403]: $errorMessage');
       } else if (response.statusCode == 404) {
