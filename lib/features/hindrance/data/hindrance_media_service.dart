@@ -1,6 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+    show debugPrint, defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:geolocator/geolocator.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -10,6 +11,28 @@ import 'package:uuid/uuid.dart';
 import 'hindrance_local_store.dart';
 import 'hindrance_storage_platform.dart';
 import 'hindrance_video_duration.dart';
+
+class _PreparedVideo {
+  const _PreparedVideo({
+    required this.file,
+    required this.filename,
+    required this.handling,
+    this.originalPath,
+    this.originalSizeBytes,
+    this.width,
+    this.height,
+    this.durationSeconds,
+  });
+
+  final File file;
+  final String filename;
+  final String handling;
+  final String? originalPath;
+  final int? originalSizeBytes;
+  final int? width;
+  final int? height;
+  final int? durationSeconds;
+}
 
 class CapturedLocation {
   final double latitude;
@@ -33,8 +56,8 @@ class CapturedLocation {
 }
 
 /// Captures geotagged media and moves it out of picker cache into app storage.
-/// Video is preserved byte-for-byte; no lossy transcode or unverified compressor
-/// is used while the server's media constraints are still unknown.
+/// Android videos are hardware-transcoded to H.264/AAC, capped at 1080p, and
+/// adopted only after the output is validated and smaller than the original.
 class HindranceMediaService {
   HindranceMediaService({ImagePicker? picker})
     : _picker = picker ?? ImagePicker();
@@ -44,6 +67,97 @@ class HindranceMediaService {
   static const _evidenceChannel = MethodChannel(
     'com.infocrats.hero/evidence_export',
   );
+  static const _videoChannel = MethodChannel(
+    'com.infocrats.hero/video_compression',
+  );
+
+  Future<void> saveDraftBackup(Map<String, dynamic> payload) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    final reportId = payload['reportId']?.toString();
+    if (reportId == null || reportId.isEmpty) return;
+    final createdAt = DateTime.tryParse(payload['createdAt']?.toString() ?? '');
+    await _evidenceChannel.invokeMethod<String>('saveDraftBackup', {
+      'relativePath': _publicRelativePath(
+        payload['recordType']?.toString() ?? 'HINDRANCE',
+        reportId,
+        createdAt,
+      ),
+      'payload': jsonEncode(payload),
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> restoreDraftBackups({
+    required String ownerId,
+    required String recordType,
+    Set<String> knownReportIds = const {},
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return const [];
+    }
+    final backups = await _evidenceChannel.invokeListMethod<dynamic>(
+      'listDraftBackups',
+    );
+    if (backups == null || backups.isEmpty) return const [];
+
+    final recovered = <Map<String, dynamic>>[];
+    for (final backup in backups) {
+      if (backup is! Map || backup['payload'] is! String) continue;
+      try {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(backup['payload'] as String) as Map,
+        );
+        if (payload['ownerId']?.toString() != ownerId ||
+            payload['recordType']?.toString().toUpperCase() !=
+                recordType.toUpperCase()) {
+          continue;
+        }
+        final reportId = payload['reportId']?.toString() ?? '';
+        if (reportId.isEmpty) continue;
+        if (knownReportIds.contains(reportId)) continue;
+        final media = <Map<String, dynamic>>[];
+        for (final entry in (payload['media'] as List? ?? const [])) {
+          if (entry is! Map) continue;
+          final item = Map<String, dynamic>.from(entry);
+          final filename = item['filename']?.toString() ?? '';
+          final folder = item['fileManagerFolder']?.toString() ?? '';
+          if (filename.isNotEmpty && folder.startsWith('Download/')) {
+            final bytes = await _evidenceChannel
+                .invokeMethod<Uint8List>('readExportedFile', {
+                  'relativePath': folder.substring('Download/'.length),
+                  'fileName': filename,
+                });
+            if (bytes != null && bytes.isNotEmpty) {
+              final file = await storePickedFile(
+                ownerId: ownerId,
+                reportId: reportId,
+                filename: filename,
+                bytes: bytes,
+              );
+              item['path'] = file.path;
+              item['storage'] = 'file';
+              item['sizeBytes'] = bytes.length;
+            }
+          }
+          media.add(item);
+        }
+        payload['media'] = media;
+        final createdAt =
+            DateTime.tryParse(payload['createdAt']?.toString() ?? '') ??
+            DateTime.now();
+        await HindranceLocalStore.instance.saveReport(
+          reportId: reportId,
+          ownerId: ownerId,
+          state: payload['queueState']?.toString() ?? 'LOCAL_SAVED',
+          payload: payload,
+          createdAt: createdAt,
+        );
+        recovered.add(payload);
+      } catch (error) {
+        debugPrint('[HindranceMediaService] Draft recovery failed: $error');
+      }
+    }
+    return recovered;
+  }
 
   Future<CapturedLocation> getFreshLocation() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
@@ -229,12 +343,22 @@ class HindranceMediaService {
       await File(picked.path).copy(output.path);
       path = output.path;
     }
+    _PreparedVideo? preparedVideo;
+    if (!kIsWeb) {
+      preparedVideo = await _prepareVideoFile(
+        File(path),
+        mediaId: mediaId,
+        filename: filename,
+      );
+      path = preparedVideo.file.path;
+    }
+    final storedFilename = preparedVideo?.filename ?? filename;
     final publicCopy = kIsWeb
         ? null
         : await _exportFile(
             sourcePath: path,
-            filename: filename,
-            mimeType: extension == '.webm' ? 'video/webm' : 'video/mp4',
+            filename: storedFilename,
+            mimeType: _videoMimeType(storedFilename),
             recordType: recordType,
             reportId: reportId,
             createdAt: createdAt,
@@ -248,11 +372,22 @@ class HindranceMediaService {
       slot: slot,
       location: location,
       durationLimitSeconds: maxDuration.inSeconds,
-      compression: 'original_preserved_no_transcode',
+      compression: preparedVideo?.handling ?? 'web_video_uncompressed',
       storage: kIsWeb ? 'indexeddb' : 'file',
     );
+    record['filename'] = storedFilename;
+    if (preparedVideo?.originalPath != null) {
+      record['sourcePath'] = preparedVideo!.originalPath;
+      record['originalSizeBytes'] = preparedVideo.originalSizeBytes;
+    }
+    if (preparedVideo?.width != null)
+      record['videoWidth'] = preparedVideo!.width;
+    if (preparedVideo?.height != null)
+      record['videoHeight'] = preparedVideo!.height;
     if (recordedDuration != null) {
       record['durationSeconds'] = recordedDuration.inSeconds;
+    } else if (preparedVideo?.durationSeconds != null) {
+      record['durationSeconds'] = preparedVideo!.durationSeconds;
     }
     record['sizeBytes'] = kIsWeb ? webBytes!.length : await File(path).length();
     if (publicCopy != null) record.addAll(publicCopy);
@@ -306,12 +441,21 @@ class HindranceMediaService {
       await File(picked.path).copy(output.path);
       path = output.path;
     }
+    final preparedVideo = bytes == null
+        ? await _prepareVideoFile(
+            File(path),
+            mediaId: mediaId,
+            filename: filename,
+          )
+        : null;
+    if (preparedVideo != null) path = preparedVideo.file.path;
+    final storedFilename = preparedVideo?.filename ?? filename;
     final publicCopy = kIsWeb
         ? null
         : await _exportFile(
             sourcePath: path,
-            filename: filename,
-            mimeType: extension == '.webm' ? 'video/webm' : 'video/mp4',
+            filename: storedFilename,
+            mimeType: _videoMimeType(storedFilename),
             recordType: recordType,
             reportId: reportId,
             createdAt: createdAt,
@@ -325,14 +469,145 @@ class HindranceMediaService {
       slot: slot,
       location: location,
       durationLimitSeconds: maxDuration.inSeconds,
-      compression: 'camera_capture_preserved_no_transcode',
+      compression: preparedVideo?.handling ?? 'web_video_uncompressed',
       storage: kIsWeb ? 'indexeddb' : 'file',
     );
-    record['filename'] = filename;
+    record['filename'] = storedFilename;
     record['durationSeconds'] = duration.inSeconds;
     record['sizeBytes'] = bytes?.length ?? await File(path).length();
+    if (preparedVideo?.originalPath != null) {
+      record['sourcePath'] = preparedVideo!.originalPath;
+      record['originalSizeBytes'] = preparedVideo.originalSizeBytes;
+    }
+    if (preparedVideo?.width != null)
+      record['videoWidth'] = preparedVideo!.width;
+    if (preparedVideo?.height != null)
+      record['videoHeight'] = preparedVideo!.height;
     if (publicCopy != null) record.addAll(publicCopy);
     return record;
+  }
+
+  Future<_PreparedVideo> _prepareVideoFile(
+    File original, {
+    required String mediaId,
+    required String filename,
+  }) async {
+    final originalSize = await original.length();
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return _PreparedVideo(
+        file: original,
+        filename: filename,
+        handling: 'original_kept_platform_encoder_unavailable',
+        originalSizeBytes: originalSize,
+      );
+    }
+
+    final compressedFilename = '${mediaId}_1080p.mp4';
+    final compressedFile = File('${original.parent.path}/$compressedFilename');
+    try {
+      final response = await _videoChannel.invokeMapMethod<String, dynamic>(
+        'compressVideo',
+        {'inputPath': original.path, 'outputPath': compressedFile.path},
+      );
+      if (response == null)
+        throw StateError('Video encoder returned no result.');
+      final outputPath = response['path']?.toString() ?? '';
+      final outputFile = File(outputPath);
+      if (!await outputFile.exists()) {
+        throw StateError('Video encoder output is missing.');
+      }
+      final outputSize = await outputFile.length();
+      final width = int.tryParse(response['width']?.toString() ?? '');
+      final height = int.tryParse(response['height']?.toString() ?? '');
+      final durationMs = int.tryParse(response['durationMs']?.toString() ?? '');
+      if (outputSize <= 0 ||
+          width == null ||
+          height == null ||
+          durationMs == null ||
+          durationMs <= 0) {
+        throw StateError('Compressed video failed validation.');
+      }
+      final unchanged = response['unchanged'] == true;
+      if (unchanged || outputSize >= originalSize) {
+        if (!unchanged && await outputFile.exists()) {
+          await outputFile.delete();
+        }
+        return _PreparedVideo(
+          file: original,
+          filename: filename,
+          handling: unchanged ? 'already_1080p_small_file' : 'original_smaller',
+          originalSizeBytes: originalSize,
+          width: width,
+          height: height,
+          durationSeconds: (durationMs / 1000).round(),
+        );
+      }
+      return _PreparedVideo(
+        file: outputFile,
+        filename: compressedFilename,
+        handling: 'h264_aac_compressed_max_1080p',
+        originalPath: original.path,
+        originalSizeBytes: originalSize,
+        width: width,
+        height: height,
+        durationSeconds: (durationMs / 1000).round(),
+      );
+    } catch (error) {
+      if (await compressedFile.exists()) await compressedFile.delete();
+      debugPrint('[HindranceMediaService] Video compression skipped: $error');
+      return _PreparedVideo(
+        file: original,
+        filename: filename,
+        handling: 'original_kept_compression_failed',
+        originalSizeBytes: originalSize,
+      );
+    }
+  }
+
+  String _videoMimeType(String filename) {
+    final extension = filename.contains('.')
+        ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase()
+        : '';
+    return switch (extension) {
+      'webm' => 'video/webm',
+      'mov' => 'video/quicktime',
+      _ => 'video/mp4',
+    };
+  }
+
+  /// Keep source captures available through offline retries. Remove them only
+  /// after the server has accepted the complete task submission.
+  Future<void> cleanupOriginalVideosAfterSubmit(List<dynamic> media) async {
+    for (final entry in media) {
+      if (entry is! Map || entry['kind'] != 'video') continue;
+      final uploadKey = entry['uploadKey']?.toString() ?? '';
+      if (uploadKey.isEmpty) continue;
+      final sourcePath = entry['sourcePath']?.toString();
+      if (sourcePath == null || sourcePath.isEmpty) continue;
+      try {
+        final source = File(sourcePath);
+        if (await source.exists()) await source.delete();
+        entry.remove('sourcePath');
+      } catch (error) {
+        debugPrint('[HindranceMediaService] Source cleanup deferred: $error');
+      }
+    }
+  }
+
+  Future<void> deleteLocalMediaFiles(Map<dynamic, dynamic> record) async {
+    final paths = <String>{
+      if (record['path'] != null) record['path'].toString(),
+      if (record['sourcePath'] != null) record['sourcePath'].toString(),
+    };
+    for (final path in paths) {
+      if (path.startsWith('indexeddb:')) continue;
+      try {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      } catch (error) {
+        debugPrint('[HindranceMediaService] Media cleanup deferred: $error');
+      }
+    }
   }
 
   Future<Map<String, dynamic>> storePickedBytes({

@@ -29,7 +29,7 @@ class HindranceLocalStore {
     final dbPath = await prepareHindranceDatabasePath();
     final database = await openDatabase(
       dbPath,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE task_snapshots (
@@ -38,6 +38,15 @@ class HindranceLocalStore {
             payload TEXT NOT NULL,
             cached_at TEXT NOT NULL,
             PRIMARY KEY (owner_id, task_id)
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE hindrance_cache (
+            owner_id TEXT NOT NULL,
+            cache_key TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            cached_at TEXT NOT NULL,
+            PRIMARY KEY (owner_id, cache_key)
           )
         ''');
         await db.execute('''
@@ -71,6 +80,17 @@ class HindranceLocalStore {
               filename TEXT NOT NULL,
               bytes BLOB NOT NULL,
               created_at TEXT NOT NULL
+            )
+          ''');
+        }
+        if (oldVersion < 3) {
+          await db.execute('''
+            CREATE TABLE hindrance_cache (
+              owner_id TEXT NOT NULL,
+              cache_key TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              cached_at TEXT NOT NULL,
+              PRIMARY KEY (owner_id, cache_key)
             )
           ''');
         }
@@ -121,6 +141,50 @@ class HindranceLocalStore {
         .whereType<Map>()
         .map((task) => Map<String, dynamic>.from(task))
         .toList();
+  }
+
+  Future<void> saveCache({
+    required String ownerId,
+    required String cacheKey,
+    required Object payload,
+  }) async {
+    final db = await database;
+    await db.insert('hindrance_cache', {
+      'owner_id': ownerId,
+      'cache_key': cacheKey,
+      'payload': jsonEncode(payload),
+      'cached_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<({Object? payload, DateTime cachedAt})?> loadCache({
+    required String ownerId,
+    required String cacheKey,
+  }) async {
+    final db = await database;
+    final rows = await db.query(
+      'hindrance_cache',
+      where: 'owner_id = ? AND cache_key = ?',
+      whereArgs: [ownerId, cacheKey],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    final cachedAt = DateTime.tryParse(row['cached_at']?.toString() ?? '');
+    if (cachedAt == null) return null;
+    return (payload: jsonDecode(row['payload']! as String), cachedAt: cachedAt);
+  }
+
+  Future<void> deleteCache({
+    required String ownerId,
+    required String cacheKey,
+  }) async {
+    final db = await database;
+    await db.delete(
+      'hindrance_cache',
+      where: 'owner_id = ? AND cache_key = ?',
+      whereArgs: [ownerId, cacheKey],
+    );
   }
 
   Future<void> saveReport({

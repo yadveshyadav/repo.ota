@@ -15,6 +15,7 @@ class AuthStorageService {
   static const String _keyAccessToken = 'hero_access_token';
   static const String _keyUatTaskAccessToken = 'uat_task_access_token';
   static const String _keyDevTaskAccessToken = 'dev_task_access_token';
+  static const String _keyProdTaskAccessToken = 'prod_task_access_token';
   static const String _keyRefreshToken = 'hero_refresh_token';
   static const String _keyUserJson = 'hero_user_json';
   static const String _keyLastActiveAt = 'hero_last_active_at';
@@ -27,6 +28,7 @@ class AuthStorageService {
   String? _accessToken;
   String? _uatTaskAccessToken;
   String? _devTaskAccessToken;
+  String? _prodTaskAccessToken;
   String? _refreshToken;
   String? _authBaseUrl;
   UserModel? _currentUser;
@@ -37,6 +39,7 @@ class AuthStorageService {
   String? get accessToken => _accessToken;
   String? get uatTaskAccessToken => _uatTaskAccessToken;
   String? get devTaskAccessToken => _devTaskAccessToken;
+  String? get prodTaskAccessToken => _prodTaskAccessToken;
   String? get refreshToken => _refreshToken;
   String? get authBaseUrl => _authBaseUrl;
   UserModel? get currentUser => _currentUser;
@@ -71,6 +74,7 @@ class AuthStorageService {
       final savedToken = prefs.getString(_keyAccessToken);
       _uatTaskAccessToken = prefs.getString(_keyUatTaskAccessToken);
       _devTaskAccessToken = prefs.getString(_keyDevTaskAccessToken);
+      _prodTaskAccessToken = prefs.getString(_keyProdTaskAccessToken);
       final savedRefreshToken = prefs.getString(_keyRefreshToken);
       _authBaseUrl = prefs.getString(_keyAuthBaseUrl);
       final savedUserJson = prefs.getString(_keyUserJson);
@@ -200,6 +204,12 @@ class AuthStorageService {
     await prefs.setString(_keyDevTaskAccessToken, token);
   }
 
+  Future<void> saveProdTaskAccessToken(String token) async {
+    _prodTaskAccessToken = token;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyProdTaskAccessToken, token);
+  }
+
   /// Update current user profile
   Future<void> updateUser(UserModel user) async {
     _currentUser = user;
@@ -218,6 +228,7 @@ class AuthStorageService {
     _accessToken = null;
     _uatTaskAccessToken = null;
     _devTaskAccessToken = null;
+    _prodTaskAccessToken = null;
     _refreshToken = null;
     _authBaseUrl = null;
     _currentUser = null;
@@ -232,6 +243,7 @@ class AuthStorageService {
       await prefs.remove(_keyAccessToken);
       await prefs.remove(_keyUatTaskAccessToken);
       await prefs.remove(_keyDevTaskAccessToken);
+      await prefs.remove(_keyProdTaskAccessToken);
       await prefs.remove(_keyRefreshToken);
       await prefs.remove(_keyAuthBaseUrl);
       await prefs.remove(_keyUserJson);

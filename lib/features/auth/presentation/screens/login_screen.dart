@@ -18,11 +18,7 @@ class LoginScreen extends StatefulWidget {
   final AuthRepository? repository;
   final AuthController? controller;
 
-  const LoginScreen({
-    super.key,
-    this.repository,
-    this.controller,
-  });
+  const LoginScreen({super.key, this.repository, this.controller});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -45,10 +41,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _authController = widget.controller ??
-        AuthController(
-          repository: widget.repository ?? ApiAuthRepository(),
-        );
+    _authController =
+        widget.controller ??
+        AuthController(repository: widget.repository ?? ApiAuthRepository());
     _authController.addListener(_onAuthStateChanged);
     _loadInstalledVersion();
 
@@ -153,7 +148,8 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minHeight: responsive.height -
+              minHeight:
+                  responsive.height -
                   MediaQuery.of(context).padding.top -
                   MediaQuery.of(context).padding.bottom -
                   32,
@@ -255,31 +251,33 @@ class _LoginScreenState extends State<LoginScreen> {
                     SizedBox(height: responsive.verticalSpacing(0.04)),
 
                     // Welcome Text
-                    const Text(
-                      AppConstants.welcomeBack,
-                      style: AppTextStyles.headingLarge,
+                    SizedBox(
+                      width: double.infinity,
+                      child: Text(
+                        AppConstants.welcomeBack,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.headingLarge,
+                      ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      AppConstants.signInSubtitle,
-                      style: AppTextStyles.bodyMedium,
+                    SizedBox(
+                      width: double.infinity,
+                      child: Text(
+                        AppConstants.signInSubtitle,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.bodyMedium,
+                      ),
                     ),
 
                     SizedBox(height: responsive.verticalSpacing(0.03)),
 
                     // Inline Error / Info Banner
                     if (errorMessage != null) ...[
-                      _MessageBanner(
-                        message: errorMessage,
-                        isError: true,
-                      ),
+                      _MessageBanner(message: errorMessage, isError: true),
                       const SizedBox(height: 16),
                     ],
                     if (_infoMessage != null && errorMessage == null) ...[
-                      _MessageBanner(
-                        message: _infoMessage!,
-                        isError: false,
-                      ),
+                      _MessageBanner(message: _infoMessage!, isError: false),
                       const SizedBox(height: 16),
                     ],
 
@@ -321,7 +319,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           size: 22,
                         ),
                         onPressed: _togglePasswordVisibility,
-                        tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+                        tooltip: _obscurePassword
+                            ? 'Show password'
+                            : 'Hide password',
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
@@ -404,10 +404,7 @@ class _MessageBanner extends StatelessWidget {
   final String message;
   final bool isError;
 
-  const _MessageBanner({
-    required this.message,
-    required this.isError,
-  });
+  const _MessageBanner({required this.message, required this.isError});
 
   @override
   Widget build(BuildContext context) {

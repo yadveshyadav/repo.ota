@@ -588,6 +588,40 @@ class TaskModel {
       status.toUpperCase() != 'CANCELLED' &&
       status.toUpperCase() != 'REJECTED';
 
+  /// True once this task has already entered or completed field submission.
+  /// Execution payloads can exist on CREATED tasks, so submission timestamps
+  /// and explicit workflow statuses are the reliable duplicate-response guard.
+  bool get hasSubmittedFieldResponse {
+    const submittedStatuses = {
+      'SUBMITTED',
+      'COMPLETED',
+      'UNDER_REVIEW',
+      'IN_REVIEW',
+      'PENDING_REVIEW',
+      'AWAITING_REVIEW',
+      'CANCELLED',
+      'REJECTED',
+    };
+    const submittedStages = {
+      'SUBMITTED',
+      'COMPLETED',
+      'REVIEW',
+      'IN_REVIEW',
+      'UNDER_REVIEW',
+      'PENDING_REVIEW',
+      'APPROVAL',
+    };
+    return submittedAt != null ||
+        taskExecution?.fieldData?.submittedAt != null ||
+        submittedStatuses.contains(status.trim().toUpperCase()) ||
+        submittedStages.contains(taskStage.trim().toUpperCase()) ||
+        const {
+          'APPROVED',
+          'PENDING_REVIEW',
+          'UNDER_REVIEW',
+        }.contains(approvalStatus.trim().toUpperCase());
+  }
+
   factory TaskModel.fromJson(dynamic json) {
     if (json == null || json is! Map<String, dynamic>) {
       return const TaskModel(
@@ -674,6 +708,24 @@ class TaskModel {
     final taskMeta = source['meta'] is Map<String, dynamic>
         ? Map<String, dynamic>.from(source['meta'] as Map<String, dynamic>)
         : <String, dynamic>{};
+    // Keep task-specific execution payloads (such as CCN proposed-route GPS
+    // points) available to detail screens without narrowing the API schema.
+    if (source['fieldData'] is Map) {
+      taskMeta['fieldData'] = Map<String, dynamic>.from(
+        source['fieldData'] as Map,
+      );
+    }
+    final executionPayload =
+        source['taskExecution'] ?? source['task_execution'];
+    if (executionPayload is Map) {
+      final executionFieldData =
+          executionPayload['fieldData'] ?? executionPayload['field_data'];
+      if (executionFieldData is Map) {
+        taskMeta['executionFieldData'] = Map<String, dynamic>.from(
+          executionFieldData,
+        );
+      }
+    }
     // Some task-service responses keep plan identifiers under taskConfig,
     // while older responses flatten the same values at the task level.
     // Preserve the nested values so Hindrance create can build its required

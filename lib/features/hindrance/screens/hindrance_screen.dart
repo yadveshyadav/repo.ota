@@ -56,7 +56,7 @@ class _HindranceScreenState extends State<HindranceScreen>
   String? _ownerId;
   String? _error;
   bool _loading = true;
-  bool _didAutoResumeDraft = false;
+  bool _submissionPreparing = false;
   bool _loadingServerHindrances = false;
   bool _serverHindranceLoadFailed = false;
   bool _serverHindrancesHaveMore = false;
@@ -82,7 +82,6 @@ class _HindranceScreenState extends State<HindranceScreen>
   bool? _ieAffected;
   List<TaskModel> _tasks = [];
   List<TaskModel> _serverHindranceTasks = [];
-  List<TaskModel> _cachedTasks = [];
   List<Map<String, dynamic>> _savedReports = [];
   Map<String, dynamic>? _draft;
   final List<Map<String, dynamic>> _media = [];
@@ -158,29 +157,49 @@ class _HindranceScreenState extends State<HindranceScreen>
       return;
     }
     _ownerId = user.id;
+    if (forceRefresh) {
+      try {
+        await _store.deleteCache(
+          ownerId: user.id,
+          cacheKey: 'boq_approvals_${_recordType.toLowerCase()}',
+        );
+      } catch (error) {
+        debugPrint('[HindranceScreen] Could not clear approval cache: $error');
+      }
+    }
     if (mounted) {
       setState(() {
-        _loading = true;
+        _loading = _tasks.isEmpty && _savedReports.isEmpty;
         _error = null;
       });
     }
     try {
       final cachedReports = await _store.loadReports(user.id);
-      PendingSyncManager.instance.restore(cachedReports);
-      final taskData = await _taskSource.load(
-        user.id,
-        forceRefresh: forceRefresh,
+      final recoveredReports = await _mediaService.restoreDraftBackups(
+        ownerId: user.id,
+        recordType: _recordType,
+        knownReportIds: cachedReports
+            .map((report) => report['reportId']?.toString() ?? '')
+            .where((id) => id.isNotEmpty)
+            .toSet(),
       );
-      unawaited(_restoreHindranceSyncRunners(cachedReports, taskData.tasks));
+      final reportsById = <String, Map<String, dynamic>>{
+        for (final report in recoveredReports)
+          if (report['reportId'] != null) report['reportId'].toString(): report,
+        for (final report in cachedReports)
+          if (report['reportId'] != null) report['reportId'].toString(): report,
+      };
+      final allReports = reportsById.values.toList();
+      PendingSyncManager.instance.restore(allReports);
+      final cachedTaskData = await _taskSource.loadCached(user.id);
       if (!mounted) return;
       setState(() {
-        _cachedTasks = taskData.fromCache ? taskData.tasks : const [];
-        _tasks = taskData.tasks;
-        _fromCache = taskData.fromCache && taskData.tasks.isNotEmpty;
-        _taskPackSaved = _fromCache;
-        _taskListHasMore = taskData.hasMore;
-        _nextTaskPage = taskData.nextPage;
-        _savedReports = cachedReports
+        if (cachedTaskData.tasks.isNotEmpty) {
+          _tasks = cachedTaskData.tasks;
+          _fromCache = true;
+          _taskPackSaved = true;
+        }
+        _savedReports = allReports
             .where(
               (report) =>
                   report['recordType']?.toString().toUpperCase() == _recordType,
@@ -188,9 +207,28 @@ class _HindranceScreenState extends State<HindranceScreen>
             .toList();
         _loading = false;
       });
-      _autoResumeSavedDraft();
+      final taskData = await _taskSource.load(
+        user.id,
+        forceRefresh: forceRefresh,
+      );
+      unawaited(_restoreHindranceSyncRunners(allReports, taskData.tasks));
+      if (!mounted) return;
+      setState(() {
+        _tasks = taskData.tasks;
+        _fromCache = taskData.fromCache && taskData.tasks.isNotEmpty;
+        _taskPackSaved = _fromCache;
+        _taskListHasMore = taskData.hasMore;
+        _nextTaskPage = taskData.nextPage;
+        _savedReports = allReports
+            .where(
+              (report) =>
+                  report['recordType']?.toString().toUpperCase() == _recordType,
+            )
+            .toList();
+        _loading = false;
+      });
       unawaited(_preloadBoqApprovals());
-      unawaited(_loadServerHindranceTasks());
+      unawaited(_loadServerHindranceTasks(forceRefresh: forceRefresh));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -200,26 +238,49 @@ class _HindranceScreenState extends State<HindranceScreen>
     }
   }
 
-  void _autoResumeSavedDraft() {
-    if (_didAutoResumeDraft) return;
-    _didAutoResumeDraft = true;
-    final saved = _savedReports.where((report) {
-      final state = report['queueState']?.toString().toUpperCase();
-      final reportId = report['reportId']?.toString() ?? '';
-      return const {'LOCAL_SAVED', 'PARTIALLY_SAVED'}.contains(state) &&
-          reportId.isNotEmpty &&
-          !PendingSyncManager.instance.isActive(reportId);
-    }).firstOrNull;
-    if (saved != null) unawaited(_resumeDraft(saved));
-  }
-
   Future<void> _loadServerHindranceTasks({
     int page = 0,
     bool append = false,
+    bool forceRefresh = false,
   }) async {
     if (!mounted) return;
+    final ownerId = _ownerId;
+    final cacheKey = 'server_tasks_${_recordType.toLowerCase()}_page_0';
+    var cacheIsFresh = false;
+    if (!append && ownerId != null && _serverHindranceTasks.isEmpty) {
+      try {
+        final cached = await _store.loadCache(
+          ownerId: ownerId,
+          cacheKey: cacheKey,
+        );
+        final payload = cached?.payload;
+        cacheIsFresh =
+            cached != null &&
+            DateTime.now().toUtc().difference(cached.cachedAt) <
+                const Duration(minutes: 5);
+        if (payload is Map && payload['tasks'] is List && mounted) {
+          setState(() {
+            _serverHindranceTasks = (payload['tasks'] as List)
+                .whereType<Map>()
+                .map((task) => TaskModel.fromJson(task))
+                .toList();
+            _serverHindrancesHaveMore = payload['hasMore'] == true;
+            _serverHindranceNextPage =
+                int.tryParse(payload['nextPage']?.toString() ?? '') ?? 1;
+          });
+        }
+      } catch (error) {
+        debugPrint(
+          '[HindranceScreen] Could not read server task cache: $error',
+        );
+      }
+    }
+    if (!append && cacheIsFresh && !forceRefresh) {
+      if (mounted) setState(() => _loadingServerHindrances = false);
+      return;
+    }
     setState(() {
-      _loadingServerHindrances = true;
+      _loadingServerHindrances = _serverHindranceTasks.isEmpty;
       _serverHindranceLoadFailed = false;
     });
     try {
@@ -232,14 +293,34 @@ class _HindranceScreenState extends State<HindranceScreen>
           .where((task) => task.taskType.toUpperCase().contains(_recordType))
           .toList();
       if (!mounted) return;
+      final combined = append
+          ? [..._serverHindranceTasks, ...hindrances]
+          : hindrances;
+      final uniqueById = {for (final task in combined) task.id: task};
+      final tasks = uniqueById.values.toList();
       setState(() {
-        _serverHindranceTasks = append
-            ? [..._serverHindranceTasks, ...hindrances]
-            : hindrances;
+        _serverHindranceTasks = tasks;
         _loadingServerHindrances = false;
         _serverHindrancesHaveMore = response.hasNext;
         _serverHindranceNextPage = response.currentPage + 1;
       });
+      if (ownerId != null && !append) {
+        try {
+          await _store.saveCache(
+            ownerId: ownerId,
+            cacheKey: cacheKey,
+            payload: {
+              'tasks': tasks.map((task) => task.toJson()).toList(),
+              'hasMore': response.hasNext,
+              'nextPage': response.currentPage + 1,
+            },
+          );
+        } catch (error) {
+          debugPrint(
+            '[HindranceScreen] Could not save server task cache: $error',
+          );
+        }
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -319,6 +400,34 @@ class _HindranceScreenState extends State<HindranceScreen>
 
   Future<void> _preloadBoqApprovals() async {
     final request = ++_boqApprovalRequest;
+    final ownerId = _ownerId;
+    if (ownerId != null && _boqCheckedBlockIds.isEmpty) {
+      try {
+        final cached = await _store.loadCache(
+          ownerId: ownerId,
+          cacheKey: 'boq_approvals_${_recordType.toLowerCase()}',
+        );
+        final payload = cached?.payload;
+        if (cached != null &&
+            DateTime.now().toUtc().difference(cached.cachedAt) <
+                const Duration(minutes: 30) &&
+            payload is Map) {
+          _boqCheckedBlockIds.addAll(
+            (payload['checkedIds'] as List? ?? const []).map(
+              (id) => id.toString(),
+            ),
+          );
+          _approvedBoqBlockIds.addAll(
+            (payload['approvedIds'] as List? ?? const []).map(
+              (id) => id.toString(),
+            ),
+          );
+        }
+      } catch (error) {
+        debugPrint('[HindranceScreen] Could not read approval cache: $error');
+      }
+    }
+    if (!mounted || request != _boqApprovalRequest) return;
     final candidates = _blocks
         .where((block) => !_boqCheckedBlockIds.contains(block.id))
         .toList();
@@ -328,53 +437,71 @@ class _HindranceScreenState extends State<HindranceScreen>
       _boqApprovalTotal = _blocks.length;
       _loadingBoqApprovals = candidates.isNotEmpty;
     });
-    if (candidates.isEmpty) {
-      if (mounted) setState(() => _loadingBoqApprovals = false);
-      return;
-    }
-    var nextIndex = 0;
-    var verificationFailed = false;
-    Future<void> worker() async {
-      while (true) {
-        if (!mounted || request != _boqApprovalRequest) return;
-        final index = nextIndex++;
-        if (index >= candidates.length) return;
-        final block = candidates[index];
-        try {
-          if (await _taskSource.hasUsableApprovedBoq(block)) {
-            _approvedBoqBlockIds.add(block.id);
-          }
-          _boqCheckedBlockIds.add(block.id);
-        } catch (error) {
-          final hasCachedApprovedBoq =
-              block.approvalStatus.toUpperCase() == 'APPROVED' &&
-              block.routeSnapshot?.routes.isNotEmpty == true;
-          if (hasCachedApprovedBoq) {
-            _approvedBoqBlockIds.add(block.id);
+    if (candidates.isNotEmpty) {
+      var nextIndex = 0;
+      var verificationFailed = false;
+      Future<void> worker() async {
+        while (true) {
+          if (!mounted || request != _boqApprovalRequest) return;
+          final index = nextIndex++;
+          if (index >= candidates.length) return;
+          final block = candidates[index];
+          try {
+            if (await _taskSource.hasUsableApprovedBoq(block)) {
+              _approvedBoqBlockIds.add(block.id);
+            }
             _boqCheckedBlockIds.add(block.id);
-          } else {
-            verificationFailed = true;
-            debugPrint(
-              '[HindranceScreen] Could not check BoQ approval for ${block.id}: $error',
-            );
-          }
-        } finally {
-          if (mounted && request == _boqApprovalRequest) {
-            setState(() => _boqApprovalChecked++);
+          } catch (error) {
+            final hasCachedApprovedBoq =
+                block.approvalStatus.toUpperCase() == 'APPROVED' &&
+                block.routeSnapshot?.routes.isNotEmpty == true;
+            if (hasCachedApprovedBoq) {
+              _approvedBoqBlockIds.add(block.id);
+              _boqCheckedBlockIds.add(block.id);
+            } else {
+              verificationFailed = true;
+              debugPrint(
+                '[HindranceScreen] Could not check BoQ approval for ${block.id}: $error',
+              );
+            }
+          } finally {
+            if (mounted && request == _boqApprovalRequest) {
+              setState(() => _boqApprovalChecked++);
+            }
           }
         }
       }
-    }
 
-    await Future.wait(
-      List.generate(candidates.length.clamp(1, 10).toInt(), (_) => worker()),
-    );
-    if (!mounted || request != _boqApprovalRequest) return;
+      await Future.wait(
+        List.generate(candidates.length.clamp(1, 10).toInt(), (_) => worker()),
+      );
+      if (!mounted || request != _boqApprovalRequest) return;
+      if (ownerId != null) {
+        try {
+          await _store.saveCache(
+            ownerId: ownerId,
+            cacheKey: 'boq_approvals_${_recordType.toLowerCase()}',
+            payload: {
+              'checkedIds': _boqCheckedBlockIds.toList(),
+              'approvedIds': _approvedBoqBlockIds.toList(),
+            },
+          );
+        } catch (error) {
+          debugPrint('[HindranceScreen] Could not save approval cache: $error');
+        }
+      }
+      if (!mounted || request != _boqApprovalRequest) return;
+      setState(() {
+        _loadingBoqApprovals = false;
+        _boqApprovalLoadError = verificationFailed
+            ? 'Some Block approvals could not be checked. Only Blocks confirmed with one approved BoQ are shown.'
+            : null;
+      });
+      return;
+    }
     setState(() {
       _loadingBoqApprovals = false;
-      _boqApprovalLoadError = verificationFailed
-          ? 'Some Block approvals could not be checked. Only Blocks confirmed with one approved BoQ are shown.'
-          : null;
+      _boqApprovalLoadError = null;
     });
   }
 
@@ -482,7 +609,14 @@ class _HindranceScreenState extends State<HindranceScreen>
           ),
           items: _circles
               .map(
-                (value) => DropdownMenuItem(value: value, child: Text(value)),
+                (value) => DropdownMenuItem(
+                  value: value,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               )
               .toList(),
           onChanged: _loadingBoqApprovals ? null : _selectCircle,
@@ -502,7 +636,14 @@ class _HindranceScreenState extends State<HindranceScreen>
           ),
           items: _districts
               .map(
-                (value) => DropdownMenuItem(value: value, child: Text(value)),
+                (value) => DropdownMenuItem(
+                  value: value,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               )
               .toList(),
           onChanged: _circle == null
@@ -1072,6 +1213,7 @@ class _HindranceScreenState extends State<HindranceScreen>
   Timer? _saveTimer;
 
   Map<String, dynamic> _payload() => {
+    'ownerId': _ownerId,
     'reportId': _draft?['reportId'],
     'recordType': _recordType,
     'hindranceId': _draft?['hindranceId'],
@@ -1143,7 +1285,12 @@ class _HindranceScreenState extends State<HindranceScreen>
       values.add(legacyValue);
     }
     return values
-        .map((value) => DropdownMenuItem(value: value, child: Text(value)))
+        .map(
+          (value) => DropdownMenuItem(
+            value: value,
+            child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        )
         .toList();
   }
 
@@ -1372,7 +1519,7 @@ class _HindranceScreenState extends State<HindranceScreen>
       await _loadHierarchyForBlock(block);
     } else {
       _showMessage(
-        'The saved Block is not in the current Dev master data. Refresh the Block list and select it again.',
+        'The saved Block is not in the current task data. Refresh the Block list and select it again.',
       );
     }
   }
@@ -1393,6 +1540,13 @@ class _HindranceScreenState extends State<HindranceScreen>
             DateTime.tryParse(_draft!['createdAt'] as String? ?? '') ??
             DateTime.now(),
       );
+      try {
+        await _mediaService.saveDraftBackup(payload);
+      } catch (error) {
+        debugPrint(
+          '[HindranceScreen] Could not back up draft to Downloads: $error',
+        );
+      }
       if (mounted) {
         final existingIndex = _savedReports.indexWhere(
           (r) => r['reportId'] == reportId,
@@ -1573,11 +1727,15 @@ class _HindranceScreenState extends State<HindranceScreen>
         );
         syncPhase = 'UPLOADING';
       }
+      final failedFrom = saved['syncFailedFromPhase']?.toString().toUpperCase();
+      final resumablePhase = syncPhase == 'SYNC_FAILED'
+          ? failedFrom
+          : syncPhase;
       final safeToResume = const {
         'QUEUED',
         'UPLOADING',
         'SAVING',
-      }.contains(syncPhase);
+      }.contains(resumablePhase);
       final failure = saved['syncError']?.toString().toLowerCase() ?? '';
       final retryableFailure =
           failure.isEmpty ||
@@ -1621,9 +1779,18 @@ class _HindranceScreenState extends State<HindranceScreen>
       final safePending = reports.any((report) {
         final state = report['queueState']?.toString().toUpperCase();
         final phase = report['syncPhase']?.toString().toUpperCase();
+        final failedFrom = report['syncFailedFromPhase']
+            ?.toString()
+            .toUpperCase();
         return report['recordType']?.toString().toUpperCase() == _recordType &&
             const {'PENDING_SYNC', 'SYNCING', 'SYNC_FAILED'}.contains(state) &&
-            const {'QUEUED', 'UPLOADING', 'SAVING'}.contains(phase);
+            (const {'QUEUED', 'UPLOADING', 'SAVING'}.contains(phase) ||
+                (phase == 'SYNC_FAILED' &&
+                    const {
+                      'QUEUED',
+                      'UPLOADING',
+                      'SAVING',
+                    }.contains(failedFrom)));
       });
       if (!safePending) return;
       final cached = await _taskSource.loadCached(ownerId);
@@ -1659,13 +1826,22 @@ class _HindranceScreenState extends State<HindranceScreen>
     var lastPersistedBytes = sentBytes;
     report['syncBytesTotal'] = totalBytes;
     report['syncBytesSent'] = sentBytes;
-    Future<void> checkpoint(String state) => _storeBackgroundReport(
-      ownerId: ownerId,
-      reportId: reportId,
-      createdAt: createdAt,
-      payload: report,
-      state: state,
-    );
+    Future<void> checkpoint(String state) {
+      PendingSyncManager.instance.updateDetails(
+        reportId,
+        phase: report['syncPhase']?.toString() ?? state,
+        currentFile: report['syncCurrentFile']?.toString(),
+        clearCurrentFile: report['syncCurrentFile'] == null,
+      );
+      return _storeBackgroundReport(
+        ownerId: ownerId,
+        reportId: reportId,
+        createdAt: createdAt,
+        payload: report,
+        state: state,
+      );
+    }
+
     try {
       if (report['serverTaskId'] == null ||
           report['serverTaskId'].toString().isEmpty) {
@@ -1693,13 +1869,21 @@ class _HindranceScreenState extends State<HindranceScreen>
         },
         onBeforeSave: () async {
           report['syncPhase'] = 'SAVING';
+          report.remove('syncCurrentFile');
           await checkpoint('SYNCING');
         },
         onBeforeSubmit: () async {
           report['syncPhase'] = 'SUBMITTING';
+          report.remove('syncCurrentFile');
           await checkpoint('SYNCING');
         },
         onUploadProgress: () => checkpoint('SYNCING'),
+        onUploadFile: (fileName) async {
+          report
+            ..['syncPhase'] = 'UPLOADING'
+            ..['syncCurrentFile'] = fileName;
+          await checkpoint('SYNCING');
+        },
         onUploadBytes: (count) async {
           sentBytes += count;
           await onBytesSent(count);
@@ -1711,11 +1895,15 @@ class _HindranceScreenState extends State<HindranceScreen>
           }
         },
       );
+      await _mediaService.cleanupOriginalVideosAfterSubmit(
+        report['media'] as List,
+      );
       report
         ..['serverTaskId'] = submittedTaskId
         ..['syncBytesSent'] = totalBytes
         ..['syncError'] = null
         ..['syncPhase'] = 'COMPLETE'
+        ..remove('syncCurrentFile')
         ..['workflowStage'] = 'ccn_question';
       await checkpoint('SUBMITTED');
       if (mounted && _draft == null) {
@@ -1732,6 +1920,8 @@ class _HindranceScreenState extends State<HindranceScreen>
     } catch (error) {
       report['syncError'] = _errorMessage(error);
       report['syncBytesSent'] = sentBytes;
+      report['syncFailedFromPhase'] = report['syncPhase'];
+      report['syncPhase'] = 'SYNC_FAILED';
       await checkpoint('SYNC_FAILED');
       rethrow;
     }
@@ -1759,13 +1949,22 @@ class _HindranceScreenState extends State<HindranceScreen>
     var lastPersistedBytes = sentBytes;
     report['syncBytesTotal'] = totalBytes;
     report['syncBytesSent'] = sentBytes;
-    Future<void> checkpoint(String state) => _storeBackgroundReport(
-      ownerId: ownerId,
-      reportId: reportId,
-      createdAt: createdAt,
-      payload: report,
-      state: state,
-    );
+    Future<void> checkpoint(String state) {
+      PendingSyncManager.instance.updateDetails(
+        reportId,
+        phase: report['syncPhase']?.toString() ?? state,
+        currentFile: report['syncCurrentFile']?.toString(),
+        clearCurrentFile: report['syncCurrentFile'] == null,
+      );
+      return _storeBackgroundReport(
+        ownerId: ownerId,
+        reportId: reportId,
+        createdAt: createdAt,
+        payload: report,
+        state: state,
+      );
+    }
+
     try {
       report['syncPhase'] = report['serverTaskId'] == null
           ? 'CREATING_TASK'
@@ -1786,13 +1985,21 @@ class _HindranceScreenState extends State<HindranceScreen>
         },
         onBeforeSave: () async {
           report['syncPhase'] = 'SAVING';
+          report.remove('syncCurrentFile');
           await checkpoint('SYNCING');
         },
         onBeforeSubmit: () async {
           report['syncPhase'] = 'SUBMITTING';
+          report.remove('syncCurrentFile');
           await checkpoint('SYNCING');
         },
         onUploadProgress: () => checkpoint('SYNCING'),
+        onUploadFile: (fileName) async {
+          report
+            ..['syncPhase'] = 'UPLOADING'
+            ..['syncCurrentFile'] = fileName;
+          await checkpoint('SYNCING');
+        },
         onUploadBytes: (count) async {
           sentBytes += count;
           await onBytesSent(count);
@@ -1804,11 +2011,15 @@ class _HindranceScreenState extends State<HindranceScreen>
           }
         },
       );
+      await _mediaService.cleanupOriginalVideosAfterSubmit(
+        report['media'] as List,
+      );
       report
         ..['serverTaskId'] = submittedId
         ..['syncBytesSent'] = totalBytes
         ..['syncError'] = null
         ..['syncPhase'] = 'COMPLETE'
+        ..remove('syncCurrentFile')
         ..['workflowStage'] = 'completed';
       await checkpoint('SUBMITTED');
       if (mounted && _draft == null) {
@@ -1825,6 +2036,8 @@ class _HindranceScreenState extends State<HindranceScreen>
     } catch (error) {
       report['syncError'] = _errorMessage(error);
       report['syncBytesSent'] = sentBytes;
+      report['syncFailedFromPhase'] = report['syncPhase'];
+      report['syncPhase'] = 'SYNC_FAILED';
       await checkpoint('SYNC_FAILED');
       rethrow;
     }
@@ -1839,7 +2052,7 @@ class _HindranceScreenState extends State<HindranceScreen>
     }
     if (block.routeSnapshot?.routes.isNotEmpty != true) {
       _showMessage(
-        'The selected Block has no saved route data. Refresh its approved Dev BoQ before continuing.',
+        'The selected Block has no saved route data. Refresh its approved BoQ before continuing.',
       );
       return;
     }
@@ -1925,7 +2138,7 @@ class _HindranceScreenState extends State<HindranceScreen>
   }
 
   Future<void> _submitHindrance() async {
-    if (_isSubmitted) return;
+    if (_isSubmitted || _submissionPreparing) return;
     if (_isOtn) {
       final slots = _media.map((item) => item['slot']?.toString()).toSet();
       if (!slots.contains('start_point') || !slots.contains('end_point')) {
@@ -1973,10 +2186,49 @@ class _HindranceScreenState extends State<HindranceScreen>
         .whereType<Map<String, dynamic>>()
         .toList();
     var totalBytes = 0;
-    for (final item in [...media, ...shpFiles]) {
-      final size = await _savedFileSize(item);
-      item['sizeBytes'] = size;
-      totalBytes += size;
+    _submissionPreparing = true;
+    setState(() => _saving = true);
+    try {
+      final existingTaskId = _serverTaskId;
+      if (existingTaskId != null && existingTaskId.isNotEmpty) {
+        try {
+          final latestTask = await _taskApi.fetchTaskDetails(existingTaskId);
+          if (latestTask.id == existingTaskId &&
+              !_canContinueServerTask(latestTask)) {
+            throw StateError(
+              'This task already has a submitted response or is no longer active. No second response was queued.',
+            );
+          }
+          if (latestTask.id != existingTaskId) {
+            debugPrint(
+              '[HindranceScreen] Task detail lookup returned no matching task; server submit will validate the task.',
+            );
+          }
+        } on StateError {
+          rethrow;
+        } catch (error) {
+          // Some UAT deployments return 500 for task-detail reads while
+          // /api/tasks/save and /api/tasks/submit remain available. A failed
+          // read must not prevent a valid response from being submitted.
+          debugPrint(
+            '[HindranceScreen] Could not pre-check task status; server submit will validate it: $error',
+          );
+        }
+      }
+      for (final item in [...media, ...shpFiles]) {
+        final size = await _savedFileSize(item);
+        item['sizeBytes'] = size;
+        totalBytes += size;
+      }
+    } catch (error) {
+      _submissionPreparing = false;
+      if (mounted) setState(() => _saving = false);
+      _showMessage(
+        error is StateError
+            ? error.message.toString()
+            : 'Could not verify this task before submission. Connect to the task service and try again. Your draft is still saved.',
+      );
+      return;
     }
     report['syncBytesTotal'] = totalBytes;
     report['syncBytesSent'] = 0;
@@ -1994,10 +2246,15 @@ class _HindranceScreenState extends State<HindranceScreen>
         state: 'PENDING_SYNC',
       );
     } catch (error) {
+      _submissionPreparing = false;
+      if (mounted) setState(() => _saving = false);
       _showMessage('Could not queue the $_workflowLabel for sync: $error');
       return;
     }
-    if (!mounted) return;
+    if (!mounted) {
+      _submissionPreparing = false;
+      return;
+    }
 
     // Close the form immediately. The captured payload, hierarchy, and files
     // remain in the account-scoped store while the upload continues.
@@ -2005,6 +2262,7 @@ class _HindranceScreenState extends State<HindranceScreen>
       _draft = null;
       _saving = false;
     });
+    _submissionPreparing = false;
     PendingSyncManager.instance.start(
       id: reportId,
       formType: _workflowLabel,
@@ -2204,8 +2462,7 @@ class _HindranceScreenState extends State<HindranceScreen>
       if (item['storage'] == 'indexeddb' && item['mediaId'] != null) {
         await _store.deleteMediaBytes(item['mediaId'].toString());
       } else if (path != null) {
-        final file = File(path);
-        if (await file.exists()) await file.delete();
+        await _mediaService.deleteLocalMediaFiles(item);
       }
     }
     setState(() => _media.removeWhere(removed.toSet().contains));
@@ -2224,8 +2481,7 @@ class _HindranceScreenState extends State<HindranceScreen>
         } catch (_) {}
       } else if (path != null) {
         try {
-          final file = File(path);
-          if (await file.exists()) await file.delete();
+          await _mediaService.deleteLocalMediaFiles(oldMedia);
         } catch (_) {}
       }
       setState(() {
@@ -2367,20 +2623,20 @@ class _HindranceScreenState extends State<HindranceScreen>
         const SizedBox(height: 24),
         ...[
           Text(
-            '$_workflowLabel tasks from Dev',
+            'Created $_workflowLabel tasks',
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
           if (_loadingServerHindrances)
             _Notice(
               icon: Icons.sync,
-              text: 'Loading created $_workflowLabel tasks from Dev…',
+              text: 'Loading created $_workflowLabel tasks…',
             ),
           if (_serverHindranceLoadFailed && _serverHindranceTasks.isEmpty)
             _Notice(
               icon: Icons.cloud_off,
               text:
-                  'Could not reach Dev to load $_workflowLabel tasks. Check the connection and refresh.',
+                  'Could not load $_workflowLabel tasks. Check the connection and refresh.',
             ),
           if (!_loadingServerHindrances &&
               !_serverHindranceLoadFailed &&
@@ -2422,7 +2678,7 @@ class _HindranceScreenState extends State<HindranceScreen>
               label: Text(
                 _loadingServerHindrances
                     ? 'Loading…'
-                    : 'Load more Dev $_workflowLabel tasks',
+                    : 'Load more $_workflowLabel tasks',
               ),
             ),
         ],
@@ -2464,6 +2720,88 @@ class _HindranceScreenState extends State<HindranceScreen>
     );
   }
 
+  bool _canContinueServerTask(TaskModel task) =>
+      task.isEligibleForCompletion &&
+      !task.hasSubmittedFieldResponse &&
+      task.active;
+
+  Future<void> _continueServerTask(
+    TaskModel listedTask,
+    BuildContext dialogContext,
+  ) async {
+    if (!_canContinueServerTask(listedTask)) return;
+    if (_ownerId == null) {
+      _showMessage('Sign in again to continue this task.');
+      return;
+    }
+
+    var task = listedTask;
+    try {
+      final details = await _taskApi.fetchTaskDetails(listedTask.id);
+      if (details.id == listedTask.id) task = details;
+    } catch (error) {
+      // The task list already contains enough information to create a safe
+      // location-selection draft. Keep the server ID so submission resumes it.
+      debugPrint('[HindranceScreen] Could not refresh task details: $error');
+    }
+    if (!mounted) return;
+    if (!_canContinueServerTask(task)) {
+      _showMessage(
+        'This task is no longer available for filling. Refresh the task list.',
+      );
+      return;
+    }
+
+    final location = task.locationSnapshot;
+    final blockId =
+        [
+              location?.blockId,
+              task.rootTaskId,
+              ...task.ancestors,
+              task.parentTaskId,
+              task.id,
+            ]
+            .whereType<String>()
+            .map((value) => value.trim())
+            .firstWhere(
+              (value) =>
+                  value.isNotEmpty && _blocks.any((block) => block.id == value),
+              orElse: () => '',
+            );
+    final block = _blocks.where((item) => item.id == blockId).firstOrNull;
+    final reportId = _uuid.v4();
+    final record = <String, dynamic>{
+      'reportId': reportId,
+      'hindranceId': task.taskCode.isNotEmpty ? task.taskCode : 'HIN-$reportId',
+      'recordType': _recordType,
+      'serverTaskId': task.id,
+      'workflowStage': 'hierarchy_selection',
+      'queueState': 'LOCAL_SAVED',
+      'blockId': block?.id,
+      'blockName': block == null ? location?.blockName : _displayName(block),
+      'description': task.description ?? task.remarks ?? '',
+      'hindranceType':
+          task.taskExecution?.fieldData?.hindranceTypes.firstOrNull,
+      'createdAt': DateTime.now().toUtc().toIso8601String(),
+      'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      'media': const <Map<String, dynamic>>[],
+      'shpFiles': const <Map<String, dynamic>>[],
+      'affectedSegments': const <Map<String, dynamic>>[],
+    };
+
+    if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+    await _store.saveReport(
+      reportId: reportId,
+      ownerId: _ownerId!,
+      state: 'LOCAL_SAVED',
+      payload: record,
+      createdAt: DateTime.now(),
+    );
+    if (!mounted) return;
+    setState(() => _savedReports.insert(0, record));
+    await _resumeDraft(record);
+  }
+
   void _showServerTaskPreview(TaskModel task) {
     final fieldData = task.taskExecution?.fieldData;
     final routeSegments =
@@ -2486,7 +2824,7 @@ class _HindranceScreenState extends State<HindranceScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  'Preview from Dev task data',
+                  'Task details',
                   style: TextStyle(color: Colors.black54),
                 ),
                 _detailRow('Task ID', task.id),
@@ -2552,6 +2890,12 @@ class _HindranceScreenState extends State<HindranceScreen>
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Close'),
           ),
+          if (_canContinueServerTask(task))
+            FilledButton.icon(
+              onPressed: () => _continueServerTask(task, dialogContext),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Continue filling'),
+            ),
         ],
       ),
     );
@@ -2838,27 +3182,64 @@ class _HindranceScreenState extends State<HindranceScreen>
                     controller: _otnReasonController,
                     enabled: !_isSubmitted,
                     decoration: const InputDecoration(
-                      labelText: 'Reason',
+                      labelText: 'Reason (optional)',
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _otnSubtype1Controller,
-                    enabled: !_isSubmitted,
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('otn-type-${_otnSubtype1Controller.text}'),
+                    initialValue: _dropdownValue(_otnSubtype1Controller.text),
                     decoration: const InputDecoration(
-                      labelText: 'Subtype 1',
+                      labelText: 'OTN Type',
                       border: OutlineInputBorder(),
                     ),
+                    isExpanded: true,
+                    hint: const Text('Select OTN Type'),
+                    items: _classificationItems(
+                      HindranceClassification.types,
+                      _otnSubtype1Controller.text,
+                    ),
+                    onChanged: _isSubmitted
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _otnSubtype1Controller.text = value;
+                              final allowedSubtypes =
+                                  HindranceClassification.otnSubtypesFor(value);
+                              if (!allowedSubtypes.contains(
+                                _otnSubtype2Controller.text,
+                              )) {
+                                _otnSubtype2Controller.clear();
+                              }
+                            });
+                            _queueAutosave();
+                          },
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _otnSubtype2Controller,
-                    enabled: !_isSubmitted,
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('otn-subtype-${_otnSubtype2Controller.text}'),
+                    initialValue: _dropdownValue(_otnSubtype2Controller.text),
                     decoration: const InputDecoration(
-                      labelText: 'Subtype 2',
+                      labelText: 'Sub-OTN Type',
                       border: OutlineInputBorder(),
                     ),
+                    isExpanded: true,
+                    hint: const Text('Select Sub-OTN Type'),
+                    items: _classificationItems(
+                      HindranceClassification.otnSubtypesFor(
+                        _otnSubtype1Controller.text,
+                      ),
+                      _otnSubtype2Controller.text,
+                    ),
+                    onChanged: _isSubmitted
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            setState(() => _otnSubtype2Controller.text = value);
+                            _queueAutosave();
+                          },
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -2870,6 +3251,7 @@ class _HindranceScreenState extends State<HindranceScreen>
                       labelText: 'Hindrance Type',
                       border: OutlineInputBorder(),
                     ),
+                    isExpanded: true,
                     hint: const Text('Select Hindrance Type'),
                     items: _classificationItems(
                       HindranceClassification.types,
@@ -2891,6 +3273,7 @@ class _HindranceScreenState extends State<HindranceScreen>
                       labelText: 'Sub-Hindrance Type',
                       border: OutlineInputBorder(),
                     ),
+                    isExpanded: true,
                     hint: const Text('Select Sub-Hindrance Type'),
                     items: _classificationItems(
                       HindranceClassification.subtypes,
@@ -3490,6 +3873,11 @@ class _HindranceScreenState extends State<HindranceScreen>
         ? '${accuracy.toStringAsFixed(1)} m'
         : double.tryParse(accuracy?.toString() ?? '')?.toStringAsFixed(1) ??
               'Not recorded';
+    final sizeBytes = int.tryParse(record?['sizeBytes']?.toString() ?? '');
+    final originalSizeBytes = int.tryParse(
+      record?['originalSizeBytes']?.toString() ?? '',
+    );
+    final videoHandling = record?['videoHandling']?.toString();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3507,8 +3895,25 @@ class _HindranceScreenState extends State<HindranceScreen>
           'GPS accuracy $accuracyText',
           style: const TextStyle(fontSize: 11, color: Colors.black87),
         ),
+        if (record?['kind'] == 'video' && sizeBytes != null) ...[
+          const SizedBox(height: 3),
+          Text(
+            videoHandling == 'h264_aac_compressed_max_1080p' &&
+                    originalSizeBytes != null
+                ? '1080p max · device frame rate · ${_formatVideoSize(sizeBytes)} (from ${_formatVideoSize(originalSizeBytes)})'
+                : 'Video · ${_formatVideoSize(sizeBytes)}${videoHandling == 'original_kept_compression_failed' ? ' · compression failed; original kept' : ''}',
+            style: const TextStyle(fontSize: 11, color: Colors.black87),
+          ),
+        ],
       ],
     );
+  }
+
+  String _formatVideoSize(int bytes) {
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / 1024).toStringAsFixed(0)} KB';
   }
 
   Widget _captureStep({

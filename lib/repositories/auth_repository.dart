@@ -23,7 +23,7 @@ abstract class AuthRepository {
   String? getAccessToken();
 }
 
-/// AuthRepository consuming IlYnc UAT authentication and task APIs.
+/// AuthRepository consuming the selected IlYnc environment's auth and task APIs.
 class ApiAuthRepository implements AuthRepository {
   final AuthApiService apiService;
   final AuthStorageService storageService;
@@ -248,9 +248,15 @@ class ApiAuthRepository implements AuthRepository {
     throw Exception('Invalid username or password.');
   }
 
-  Future<void> _saveIlYncTaskToken(String token) => AppConstants.ilyncIsDev
-      ? storageService.saveDevTaskAccessToken(token)
-      : storageService.saveUatTaskAccessToken(token);
+  Future<void> _saveIlYncTaskToken(String token) {
+    if (AppConstants.ilyncIsDev) {
+      return storageService.saveDevTaskAccessToken(token);
+    }
+    if (AppConstants.ilyncIsProd) {
+      return storageService.saveProdTaskAccessToken(token);
+    }
+    return storageService.saveUatTaskAccessToken(token);
+  }
 
   @override
   Future<void> logout() async {

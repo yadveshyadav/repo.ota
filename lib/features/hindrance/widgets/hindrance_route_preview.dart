@@ -105,7 +105,7 @@ class HindranceRoutePreview extends StatelessWidget {
               children: [
                 TileLayer(
                   urlTemplate:
-                      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                      'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
                   userAgentPackageName: 'com.infocrats.hero',
                 ),
                 PolylineLayer(

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 
 class RecordedCcnVideo {
@@ -12,7 +13,8 @@ class RecordedCcnVideo {
 }
 
 /// Records in-app so the parent screen can keep the GPS trace active alongside
-/// the camera. The recording is returned as captured; it is not transcoded.
+/// the camera. It requests 1080p/90 fps when supported and falls back to the
+/// camera's supported frame rate while keeping the 1080p quality preset.
 class CcnCameraRecordingScreen extends StatefulWidget {
   const CcnCameraRecordingScreen({super.key, required this.maxDuration});
 
@@ -24,6 +26,10 @@ class CcnCameraRecordingScreen extends StatefulWidget {
 }
 
 class _CcnCameraRecordingScreenState extends State<CcnCameraRecordingScreen> {
+  static const _videoChannel = MethodChannel(
+    'com.infocrats.hero/video_compression',
+  );
+
   CameraController? _controller;
   Timer? _ticker;
   DateTime? _recordingStartedAt;
@@ -31,6 +37,8 @@ class _CcnCameraRecordingScreenState extends State<CcnCameraRecordingScreen> {
   String? _error;
   bool _busy = false;
   bool _recording = false;
+  List<int> _fpsCandidates = const [];
+  int? _activeFps;
 
   @override
   void initState() {
@@ -38,7 +46,8 @@ class _CcnCameraRecordingScreenState extends State<CcnCameraRecordingScreen> {
     _initializeCamera();
   }
 
-  Future<void> _initializeCamera() async {
+  Future<void> _initializeCamera({List<int>? fpsCandidates}) async {
+    CameraController? controller;
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) throw Exception('No camera is available.');
@@ -46,19 +55,63 @@ class _CcnCameraRecordingScreenState extends State<CcnCameraRecordingScreen> {
         (item) => item.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
-      final controller = CameraController(
-        camera,
-        ResolutionPreset.high,
-        enableAudio: true,
-      );
-      await controller.initialize();
-      if (!mounted) {
-        await controller.dispose();
-        return;
+      final candidates = fpsCandidates ?? await _supportedFpsCandidates(camera);
+      _fpsCandidates = candidates;
+      final attempts = <int?>[...candidates, null];
+      Object? lastError;
+      for (final fps in attempts) {
+        try {
+          controller = CameraController(
+            camera,
+            ResolutionPreset.veryHigh,
+            enableAudio: true,
+            fps: fps,
+            videoBitrate: 10000000,
+            audioBitrate: 128000,
+          );
+          await controller.initialize();
+          if (!mounted) {
+            await controller.dispose();
+            return;
+          }
+          setState(() {
+            _controller = controller;
+            _activeFps = fps;
+            _error = null;
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          await controller?.dispose();
+          controller = null;
+        }
       }
-      setState(() => _controller = controller);
+      throw lastError ?? Exception('Could not initialize the camera.');
     } catch (error) {
+      if (controller != null) await controller.dispose();
       if (mounted) setState(() => _error = error.toString());
+    }
+  }
+
+  Future<List<int>> _supportedFpsCandidates(CameraDescription camera) async {
+    try {
+      final ranges = await _videoChannel.invokeListMethod<dynamic>(
+        'supportedFpsRanges',
+        {'cameraId': camera.name},
+      );
+      final candidates = <int>{};
+      for (final range in ranges ?? const []) {
+        if (range is! List || range.length < 2) continue;
+        final lower = (range[0] as num).toInt();
+        final upper = (range[1] as num).toInt();
+        final target = upper > 90 ? 90 : upper;
+        if (target >= lower && target > 0) candidates.add(target);
+      }
+      return candidates.toList()..sort((a, b) => b.compareTo(a));
+    } on PlatformException {
+      return const [];
+    } on MissingPluginException {
+      return const [];
     }
   }
 
@@ -83,6 +136,23 @@ class _CcnCameraRecordingScreenState extends State<CcnCameraRecordingScreen> {
         }
       });
     } catch (error) {
+      if (_activeFps != null) {
+        final failedFps = _activeFps!;
+        await controller.dispose();
+        if (mounted) setState(() => _controller = null);
+        final lowerCandidates = _fpsCandidates
+            .where((fps) => fps < failedFps)
+            .toList();
+        await _initializeCamera(fpsCandidates: lowerCandidates);
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error =
+                'Could not start at $failedFps fps. Trying a lower supported rate; tap Record to start.';
+          });
+        }
+        return;
+      }
       if (mounted) {
         setState(() {
           _busy = false;

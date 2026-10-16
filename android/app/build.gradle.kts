@@ -31,8 +31,8 @@ android {
         versionName = flutter.versionName
     }
 
-    // Dev and UAT variants can be installed side by side. UAT preserves the
-    // existing package ID; Dev gets a suffix to avoid replacing that app.
+    // Dev, UAT, and Prod variants can be installed side by side. UAT preserves
+    // the existing package ID; Dev and Prod get suffixes.
     flavorDimensions += "environment"
     productFlavors {
         create("dev") {
@@ -43,6 +43,10 @@ android {
         create("uat") {
             dimension = "environment"
             manifestPlaceholders["appLabel"] = "HERO APP UAT"
+        }
+        create("prod") {
+            dimension = "environment"
+            manifestPlaceholders["appLabel"] = "HERO APP"
         }
     }
 
@@ -68,6 +72,12 @@ android {
             )
         }
     }
+}
+
+dependencies {
+    // Hardware-accelerated H.264/AAC video compression for evidence uploads.
+    implementation("androidx.media3:media3-transformer:1.6.1")
+    implementation("androidx.media3:media3-effect:1.6.1")
 }
 
 kotlin {

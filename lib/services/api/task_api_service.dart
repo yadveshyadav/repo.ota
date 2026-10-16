@@ -19,15 +19,14 @@ class TaskApiService {
   /// another API request having run first.
   void _useTaskServiceToken() {
     final storage = AuthStorageService();
-    final isUat = !AppConstants.ilyncIsDev;
-    final taskToken = isUat
-        ? storage.uatTaskAccessToken
-        : storage.devTaskAccessToken;
+    final taskToken = AppConstants.ilyncIsDev
+        ? storage.devTaskAccessToken
+        : AppConstants.ilyncIsProd
+        ? storage.prodTaskAccessToken
+        : storage.uatTaskAccessToken;
     if (taskToken == null || taskToken.isEmpty) {
       throw StateError(
-        isUat
-            ? 'Sign in again to establish UAT task access.'
-            : 'Sign in again to establish Dev task access.',
+        'Sign in again to establish ${AppConstants.ilyncEnvironment.toUpperCase()} task access.',
       );
     }
     apiClient.setAuthToken(taskToken);
@@ -212,6 +211,22 @@ class TaskApiService {
       }
     }
     throw Exception('Failed to fetch task details from API endpoints.');
+  }
+
+  /// Fast best-effort status read used around media submission. The submit
+  /// endpoint remains authoritative if this read fails; do not let three
+  /// sequential compatibility fallbacks add up to 30 seconds per check.
+  Future<TaskModel> fetchTaskStatusForSubmission(String taskId) async {
+    _useTaskServiceToken();
+    final endpoint = '/api/tasks/my-tasks/$taskId';
+    try {
+      final response = await apiClient
+          .get(endpoint)
+          .timeout(const Duration(seconds: 4));
+      return TaskModel.fromJson(response);
+    } catch (_) {
+      throw Exception('Task status check did not respond in time.');
+    }
   }
 
   /// Fetch standalone Task Execution payload for a specific task ID

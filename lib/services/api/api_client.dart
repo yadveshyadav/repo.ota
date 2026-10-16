@@ -226,15 +226,27 @@ class ApiClient {
         ..contentLength = bytes.length;
       // Start consuming while chunks are queued so the UI progress reflects
       // bytes handed to the HTTP transport instead of only file completions.
+      // Larger files on mobile links need more than the old fixed two-minute
+      // ceiling. Keep a bounded size-aware deadline for the whole PUT.
+      final timeoutSeconds = (120 + (bytes.length / (128 * 1024)).ceil())
+          .clamp(120, 900)
+          .toInt();
       final responseFuture = _client
           .send(request)
-          .timeout(const Duration(minutes: 2));
+          .timeout(Duration(seconds: timeoutSeconds));
       const chunkSize = 64 * 1024;
+      const progressIntervalBytes = 512 * 1024;
+      var unreportedBytes = 0;
       for (var offset = 0; offset < bytes.length; offset += chunkSize) {
         final end = (offset + chunkSize).clamp(0, bytes.length);
         request.sink.add(bytes.sublist(offset, end));
-        await onBytesSent?.call(end - offset);
+        unreportedBytes += end - offset;
+        if (unreportedBytes >= progressIntervalBytes) {
+          await onBytesSent?.call(unreportedBytes);
+          unreportedBytes = 0;
+        }
       }
+      if (unreportedBytes > 0) await onBytesSent?.call(unreportedBytes);
       await request.sink.close();
       final response = await http.Response.fromStream(await responseFuture);
 

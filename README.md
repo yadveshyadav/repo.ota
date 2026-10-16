@@ -16,7 +16,7 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
-## Dev and UAT Android builds
+## Dev, UAT, and Prod Android builds
 
 Build from the repository root with Flutter. Always pair the Android flavor
 with the matching `ILYNC_ENV` define so the app label, package, and IlYnc API
@@ -34,9 +34,17 @@ flutter run --flavor uat --dart-define=ILYNC_ENV=uat
 
 # Build a UAT release APK
 flutter build apk --release --flavor uat --dart-define=ILYNC_ENV=uat
+
+# Run Prod on a connected device (package: com.infocrats.heroapp)
+flutter run --flavor prod --dart-define=ILYNC_ENV=prod
+
+# Build a Prod release APK (IlYnc API: https://ilync.tech)
+flutter build apk --release --flavor prod --dart-define=ILYNC_ENV=prod
 ```
 
-APK outputs are `build/app/outputs/flutter-apk/app-dev-release.apk` and
-`build/app/outputs/flutter-apk/app-uat-release.apk`. The UAT flavor retains the
-existing `com.infocrats.heroapp` package ID; Dev adds `.dev`, so both can be
-installed together. Debug builds use the same commands without `--release`.
+APK outputs are `build/app/outputs/flutter-apk/app-dev-release.apk`,
+`build/app/outputs/flutter-apk/app-uat-release.apk`, and
+`build/app/outputs/flutter-apk/app-prod-release.apk`. UAT and Prod use the
+existing `com.infocrats.heroapp` package ID; Dev adds `.dev`. UAT and Prod
+therefore replace each other when installed on the same device. Debug builds
+use the same commands without `--release`.

@@ -21,6 +21,7 @@ import 'package:hero_app/features/hindrance/widgets/hindrance_route_preview.dart
 import 'package:hero_app/features/hindrance/widgets/hindrance_glass_surface.dart';
 import 'package:hero_app/features/hindrance/widgets/pending_sync_action.dart';
 import 'package:hero_app/models/task_model.dart';
+import 'package:hero_app/models/task_filter.dart';
 import 'package:hero_app/services/api/task_api_service.dart';
 import 'package:uuid/uuid.dart';
 
@@ -59,6 +60,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   List<Map<String, dynamic>> _proposedRoutePoints = [];
   List<TaskModel> _tasks = [];
   List<TaskModel> _cachedTasks = [];
+  List<TaskModel> _ccnHistory = [];
   String? _blockId;
   String? _circle;
   String? _district;
@@ -69,12 +71,14 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
   bool _tasksFromCache = false;
   bool _taskListHasMore = false;
   bool _loadingMoreTasks = false;
+  bool _loadingCcnHistory = true;
   bool _loadingHierarchy = false;
   String? _hierarchyLoadError;
   String _approvalStatus = 'PENDING';
   int _nextTaskPage = 1;
   bool _saving = false;
   bool _loading = true;
+  bool _showLanding = false;
   Timer? _autosave;
 
   Map<String, dynamic>? get _mediaAtStart =>
@@ -252,6 +256,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       _cachedTasks = cachedTasks.tasks;
       _tasks = cachedTasks.tasks;
       _tasksFromCache = cachedTasks.tasks.isNotEmpty;
+      _showLanding = widget.hindrance.isEmpty;
       _loading = false;
     });
     final initialBlock = _blocks
@@ -259,8 +264,56 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         .firstOrNull;
     _circle = initialBlock?.circle;
     _district = initialBlock?.district;
-    await _persist();
     unawaited(_refreshTasks());
+    unawaited(_refreshCcnHistory());
+  }
+
+  Future<void> _refreshCcnHistory() async {
+    if (mounted) setState(() => _loadingCcnHistory = true);
+    try {
+      final found = <TaskModel>[];
+      final seen = <String>{};
+      var page = 0;
+      var hasNext = true;
+      // Fetch the user's CCN task pages so older submissions appear too.
+      while (hasNext && page < 20) {
+        final response = await _taskApi.fetchTasks(
+          page: page,
+          size: 100,
+          filters: const TaskFilterModel(taskType: 'CCN'),
+        );
+        for (final task in response.tasks) {
+          if (task.taskType.trim().toUpperCase() == 'CCN' &&
+              seen.add(task.id)) {
+            found.add(task);
+          }
+        }
+        hasNext = response.hasNext;
+        page++;
+      }
+      if (!mounted) return;
+      setState(() {
+        _ccnHistory = found
+          ..sort((a, b) {
+            final aDate = a.createdAt ?? a.submittedAt;
+            final bDate = b.createdAt ?? b.submittedAt;
+            if (aDate == null) return bDate == null ? 0 : 1;
+            if (bDate == null) return -1;
+            return bDate.compareTo(aDate);
+          });
+        _loadingCcnHistory = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loadingCcnHistory = false);
+      debugPrint('[CCN] Could not load CCN task history: $error');
+    }
+  }
+
+  Future<void> _startNewCcn() async {
+    if (!mounted) return;
+    setState(() => _showLanding = false);
+    await _persist();
   }
 
   Future<void> _refreshTasks() async {
@@ -741,8 +794,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           media['mediaId'] != null) {
         await _store.deleteMediaBytes(media['mediaId'].toString());
       } else if (media['storage'] == 'file' && media['path'] != null) {
-        final file = File(media['path'].toString());
-        if (await file.exists()) await file.delete();
+        await _mediaService.deleteLocalMediaFiles(media);
       }
     }
     if (!mounted) return;
@@ -774,17 +826,14 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         } catch (_) {}
       } else if (path != null) {
         try {
-          final file = File(path);
-          if (await file.exists()) await file.delete();
+          await _mediaService.deleteLocalMediaFiles(oldMedia);
         } catch (_) {}
       }
       setState(() {
         _media.removeAt(existingIndex);
       });
     }
-    if (slot.contains('video') ||
-        slot.contains('walkthrough') ||
-        slot.endsWith('end_point')) {
+    if (slot.contains('video') || slot.contains('walkthrough')) {
       await _captureVideo(slot, duration ?? const Duration(minutes: 5));
     } else {
       await _capturePhoto(slot);
@@ -919,6 +968,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       final report = _payload(state: 'PENDING_SYNC')
         ..['syncBytesTotal'] = totalBytes
         ..['syncBytesSent'] = 0
+        ..['syncPhase'] = 'QUEUED'
         ..['syncError'] = null;
       report['createdAt'] = createdAt.toIso8601String();
       report['queueState'] = 'PENDING_SYNC';
@@ -934,9 +984,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
         id: reportId,
         formType: 'CCN',
         totalBytes: totalBytes,
-        files: _media
-            .map(PendingSyncManager.fileLabel)
-            .toList(),
+        files: _media.map(PendingSyncManager.fileLabel).toList(),
         run: (onBytesSent) async {
           var sentBytes = _media
               .where((item) => item['uploadKey'] != null)
@@ -951,6 +999,12 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           Future<void> checkpoint(String state) async {
             report['queueState'] = state;
             report['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+            PendingSyncManager.instance.updateDetails(
+              reportId,
+              phase: report['syncPhase']?.toString() ?? state,
+              currentFile: report['syncCurrentFile']?.toString(),
+              clearCurrentFile: report['syncCurrentFile'] == null,
+            );
             await _store.saveReport(
               reportId: reportId,
               ownerId: ownerId,
@@ -961,6 +1015,10 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           }
 
           try {
+            report['syncPhase'] = _serverTaskId == null
+                ? 'CREATING_TASK'
+                : 'UPLOADING';
+            await checkpoint('SYNCING');
             if (sentBytes > 0) {
               await onBytesSent(sentBytes);
               await checkpoint('SYNCING');
@@ -974,7 +1032,25 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
               onTaskCreated: (createdTaskId) async {
                 report
                   ..['serverTaskId'] = createdTaskId
-                  ..['ccnId'] = createdTaskId;
+                  ..['ccnId'] = createdTaskId
+                  ..['syncPhase'] = 'UPLOADING';
+                await checkpoint('SYNCING');
+              },
+              onUploadFile: (fileName) async {
+                report
+                  ..['syncPhase'] = 'UPLOADING'
+                  ..['syncCurrentFile'] = fileName;
+                await checkpoint('SYNCING');
+              },
+              onUploadProgress: () => checkpoint('SYNCING'),
+              onBeforeSave: () async {
+                report['syncPhase'] = 'SAVING';
+                report.remove('syncCurrentFile');
+                await checkpoint('SYNCING');
+              },
+              onBeforeSubmit: () async {
+                report['syncPhase'] = 'SUBMITTING';
+                report.remove('syncCurrentFile');
                 await checkpoint('SYNCING');
               },
               onUploadBytes: (count) async {
@@ -988,11 +1064,16 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 }
               },
             );
+            await _mediaService.cleanupOriginalVideosAfterSubmit(
+              report['media'] as List,
+            );
             report
               ..['serverTaskId'] = taskId
               ..['ccnId'] = taskId
               ..['syncBytesSent'] = totalBytes
-              ..['syncError'] = null;
+              ..['syncError'] = null
+              ..['syncPhase'] = 'COMPLETE'
+              ..remove('syncCurrentFile');
             await checkpoint('SUBMITTED');
             await _markLinkedHindranceCcnSubmitted(
               ownerId,
@@ -1002,6 +1083,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           } catch (error) {
             report['syncError'] = error.toString();
             report['syncBytesSent'] = sentBytes;
+            report['syncFailedFromPhase'] = report['syncPhase'];
+            report['syncPhase'] = 'SYNC_FAILED';
             await checkpoint('SYNC_FAILED');
             rethrow;
           }
@@ -1129,6 +1212,8 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                     child: Text(_error!),
                   ),
                 )
+              : _showLanding
+              ? _buildLandingPage()
               : _hierarchyConfirmed
               ? _buildForm()
               : _buildTaskHierarchyStep(),
@@ -1140,7 +1225,13 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             radius: 22,
             child: SizedBox(
               width: double.infinity,
-              child: _hierarchyConfirmed
+              child: _showLanding
+                  ? FilledButton.icon(
+                      onPressed: _startNewCcn,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create CCN'),
+                    )
+                  : _hierarchyConfirmed
                   ? FilledButton.icon(
                       onPressed: _saving || !_routeReady ? null : _submit,
                       icon: const Icon(Icons.save_outlined),
@@ -1159,6 +1250,349 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                       label: const Text('Continue to CCN'),
                     ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLandingPage() => ListView(
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+    children: [
+      _section('CCN', [
+        const Icon(
+          Icons.route_outlined,
+          size: 42,
+          color: AppColors.primaryGreen,
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Create a Change Control Note',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Start a CCN, then choose the circle, district, block, ring, and affected segments.',
+        ),
+      ]),
+      const SizedBox(height: 4),
+      _section('Your CCN History', [
+        Row(
+          children: [
+            const Expanded(child: Text('Tasks created from your account')),
+            IconButton(
+              tooltip: 'Refresh CCN history',
+              onPressed: _loadingCcnHistory ? null : _refreshCcnHistory,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        if (_loadingCcnHistory && _ccnHistory.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_ccnHistory.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Text('No CCN history is available yet.'),
+          )
+        else
+          ..._ccnHistory.map(_buildCcnHistoryTile),
+      ]),
+    ],
+  );
+
+  Widget _buildCcnHistoryTile(TaskModel task) {
+    final taskStatus = task.status.trim();
+    final approvalStatus = task.approvalStatus.trim();
+    final status =
+        taskStatus.isNotEmpty && taskStatus.toUpperCase() != 'UNKNOWN'
+        ? taskStatus
+        : approvalStatus;
+    final date = task.createdAt ?? task.submittedAt;
+    final statusText = status.isEmpty || status.toUpperCase() == 'UNKNOWN'
+        ? 'Status unavailable'
+        : status.replaceAll('_', ' ');
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const CircleAvatar(child: Icon(Icons.route_outlined)),
+      title: Text(
+        task.displayName.trim().isEmpty ? task.taskCode : task.displayName,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        '${task.taskCode} • $statusText${date == null ? '' : ' • ${MaterialLocalizations.of(context).formatShortDate(date.toLocal())}'}',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => _showCcnHistoryDetails(task, statusText),
+    );
+  }
+
+  Future<void> _showCcnHistoryDetails(TaskModel listedTask, String status) {
+    final detailsFuture = _taskApi
+        .fetchTaskDetails(listedTask.id)
+        .catchError((_) => listedTask);
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => FutureBuilder<TaskModel>(
+        future: detailsFuture,
+        builder: (context, snapshot) {
+          final task = snapshot.data ?? listedTask;
+          final existing = _historyExistingRoutePoints(task);
+          final proposed = _historyProposedRoutePoints(task);
+          final canShowMap = existing.length > 1 || proposed.length > 1;
+          return AlertDialog(
+            title: Text(
+              task.displayName.trim().isEmpty ? 'CCN' : task.displayName,
+            ),
+            content: snapshot.connectionState == ConnectionState.waiting
+                ? const SizedBox(
+                    height: 96,
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                : ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height * 0.55,
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Task: ${task.taskCode}'),
+                          const SizedBox(height: 8),
+                          Text('Status: ${_historyStatus(task, status)}'),
+                          if (task.approvalStatus.trim().isNotEmpty)
+                            Text(
+                              'Approval: ${task.approvalStatus.replaceAll('_', ' ')}',
+                            ),
+                          if (task.locationSnapshot?.district.isNotEmpty ==
+                              true)
+                            Text(
+                              'District: ${task.locationSnapshot!.district}',
+                            ),
+                          if (task.locationSnapshot?.circle.isNotEmpty == true)
+                            Text('Circle: ${task.locationSnapshot!.circle}'),
+                          if ((task.description ?? task.remarks)
+                                  ?.trim()
+                                  .isNotEmpty ==
+                              true) ...[
+                            const SizedBox(height: 8),
+                            Text(task.description ?? task.remarks!),
+                          ],
+                          const SizedBox(height: 14),
+                          if (canShowMap)
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                onPressed: () => _showCcnHistoryMap(
+                                  task,
+                                  existing,
+                                  proposed,
+                                ),
+                                icon: const Icon(Icons.map_outlined),
+                                label: const Text('Show route map'),
+                              ),
+                            )
+                          else
+                            const Text(
+                              'Route coordinates are not available in the task response.',
+                              style: TextStyle(color: Colors.black54),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  String _historyStatus(TaskModel task, String fallback) {
+    final status = task.status.trim();
+    if (status.isNotEmpty && status.toUpperCase() != 'UNKNOWN') {
+      return status.replaceAll('_', ' ');
+    }
+    return fallback;
+  }
+
+  List<Map<String, dynamic>> _historyExistingRoutePoints(TaskModel task) {
+    final points = <Map<String, dynamic>>[];
+    void addSegment(TaskSegmentModel segment) {
+      final start = _coordinatePoint(segment.startLat, segment.startLng);
+      final end = _coordinatePoint(segment.targetLat, segment.targetLng);
+      if (start != null &&
+          (points.isEmpty || !_samePoint(points.last, start))) {
+        points.add(start);
+      }
+      if (end != null && (points.isEmpty || !_samePoint(points.last, end))) {
+        points.add(end);
+      }
+    }
+
+    final segments = task.segmentSnapshots.isNotEmpty
+        ? task.segmentSnapshots
+        : task.routeSnapshot?.segments ?? const <TaskSegmentModel>[];
+    for (final segment in segments) {
+      addSegment(segment);
+    }
+    if (points.length > 1) return points;
+
+    void walkRoutes(List<TaskRouteModel> routes) {
+      for (final route in routes) {
+        for (final coordinate in route.polylineCoordinates ?? const []) {
+          if (coordinate.length < 2) continue;
+          final point = _coordinatePoint(coordinate[0], coordinate[1]);
+          if (point != null &&
+              (points.isEmpty || !_samePoint(points.last, point))) {
+            points.add(point);
+          }
+        }
+        if (route.segments.isNotEmpty) {
+          for (final segment in route.segments) {
+            addSegment(segment);
+          }
+        }
+        walkRoutes(route.childRoutes);
+      }
+    }
+
+    walkRoutes(task.routeSnapshot?.routes ?? const <TaskRouteModel>[]);
+    if (points.length < 2) {
+      final start = _coordinatePoint(
+        task.routeSnapshot?.startNode?.latitude,
+        task.routeSnapshot?.startNode?.longitude,
+      );
+      final end = _coordinatePoint(
+        task.routeSnapshot?.targetNode?.latitude,
+        task.routeSnapshot?.targetNode?.longitude,
+      );
+      if (start != null && end != null) return [start, end];
+    }
+    return points;
+  }
+
+  List<Map<String, dynamic>> _historyProposedRoutePoints(TaskModel task) {
+    final fieldData =
+        task.meta?['fieldData'] ?? task.meta?['executionFieldData'];
+    if (fieldData is! Map) return const [];
+    final proposed =
+        fieldData['proposedCcn'] ??
+        fieldData['proposedCCN'] ??
+        fieldData['proposedCcnData'];
+    final containers = [if (proposed is Map) proposed, fieldData];
+    for (final container in containers) {
+      for (final key in const [
+        'proposedRoutePoints',
+        'routePoints',
+        'trace',
+        'points',
+      ]) {
+        final rawPoints = container[key];
+        if (rawPoints is! List) continue;
+        final points = rawPoints
+            .whereType<Map>()
+            .map(
+              (point) => _coordinatePoint(
+                point['latitude'] ?? point['lat'],
+                point['longitude'] ?? point['lng'] ?? point['lon'],
+              ),
+            )
+            .whereType<Map<String, dynamic>>()
+            .toList();
+        if (points.length > 1) return points;
+      }
+    }
+
+    final photos = proposed is Map ? proposed['photos'] : fieldData['photos'];
+    if (photos is! List) return const [];
+    final media = photos.whereType<Map>().toList();
+    int order(Map item) {
+      final label = (item['label'] ?? item['slot'] ?? '')
+          .toString()
+          .toLowerCase();
+      if (label.contains('new_start')) return 0;
+      if (label.contains('new_walkthrough')) return 1;
+      if (label.contains('new_end')) return 2;
+      return 3;
+    }
+
+    media.sort((a, b) => order(a).compareTo(order(b)));
+    final routePoints = <Map<String, dynamic>>[];
+    for (final item in media) {
+      for (final key in const ['routePoints', 'gpsPoints', 'trace', 'points']) {
+        final rawPoints = item[key];
+        if (rawPoints is List) {
+          for (final point in rawPoints.whereType<Map>()) {
+            final coordinate = _coordinatePoint(
+              point['latitude'] ?? point['lat'],
+              point['longitude'] ?? point['lng'] ?? point['lon'],
+            );
+            if (coordinate != null &&
+                (routePoints.isEmpty ||
+                    !_samePoint(routePoints.last, coordinate))) {
+              routePoints.add(coordinate);
+            }
+          }
+        }
+      }
+      final coordinate = _coordinatePoint(
+        item['latitude'] ?? item['lat'],
+        item['longitude'] ?? item['lng'] ?? item['lon'],
+      );
+      if (coordinate != null &&
+          (routePoints.isEmpty || !_samePoint(routePoints.last, coordinate))) {
+        routePoints.add(coordinate);
+      }
+    }
+    return routePoints;
+  }
+
+  void _showCcnHistoryMap(
+    TaskModel task,
+    List<Map<String, dynamic>> existing,
+    List<Map<String, dynamic>> proposed,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('CCN Route Map'),
+            leading: IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close),
+            ),
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                task.displayName.trim().isEmpty
+                    ? task.taskCode
+                    : task.displayName,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              HindranceRoutePreview(
+                existingPoints: existing,
+                proposedPoints: proposed,
+                proposedRouteApproved:
+                    task.approvalStatus.toUpperCase() == 'APPROVED',
+                title: 'Existing and proposed routes',
+                height: MediaQuery.sizeOf(context).height * 0.68,
+              ),
+            ],
           ),
         ),
       ),
@@ -1216,7 +1650,14 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             isExpanded: true,
             items: _circles
                 .map(
-                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                  (value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 )
                 .toList(),
             onChanged: (value) => setState(() {
@@ -1239,7 +1680,14 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
             isExpanded: true,
             items: _districts
                 .map(
-                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                  (value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 )
                 .toList(),
             onChanged: (value) => setState(() {
@@ -1260,11 +1708,16 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 ? _blockId
                 : null,
             decoration: const InputDecoration(labelText: 'Block'),
+            isExpanded: true,
             items: visibleBlocks
                 .map(
                   (task) => DropdownMenuItem<String>(
                     value: task.id,
-                    child: Text(_taskName(task, null)),
+                    child: Text(
+                      _taskName(task, null),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 )
                 .toList(),
@@ -1276,6 +1729,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 ? _ringId
                 : null,
             decoration: const InputDecoration(labelText: 'Ring'),
+            isExpanded: true,
             hint: Text(
               _blockId == null ? 'Select a Block first' : 'Select Ring',
             ),
@@ -1283,7 +1737,11 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                 .map(
                   (task) => DropdownMenuItem<String>(
                     value: task.id,
-                    child: Text(_taskName(task, null)),
+                    child: Text(
+                      _taskName(task, null),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 )
                 .toList(),
@@ -1411,11 +1869,14 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                       final segment = segments[index];
                       return CheckboxListTile(
                         dense: true,
+                        visualDensity: VisualDensity.compact,
                         contentPadding: EdgeInsets.zero,
                         value: _isSegmentSelected(segment),
                         title: Text(segment.segmentCode),
                         subtitle: Text(
                           '${segment.startNode} → ${segment.targetNode}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         onChanged: (selected) => setState(() {
                           if (selected == true) {
@@ -1476,10 +1937,18 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           DropdownButtonFormField<String>(
             initialValue: _category,
             decoration: const InputDecoration(labelText: 'Subtype 1'),
+            isExpanded: true,
             hint: const Text('Select category'),
             items: ccnCategories
                 .map(
-                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                  (value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 )
                 .toList(),
             onChanged: (value) => setState(() {
@@ -1492,12 +1961,20 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           DropdownButtonFormField<String>(
             initialValue: _subtype,
             decoration: const InputDecoration(labelText: 'Subtype 2'),
+            isExpanded: true,
             hint: Text(
               _category == null ? 'Select Subtype 1 first' : 'Select subtype',
             ),
             items: (ccnSubtypes[_category] ?? const <String>[])
                 .map(
-                  (value) => DropdownMenuItem(value: value, child: Text(value)),
+                  (value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 )
                 .toList(),
             onChanged: _category == null
@@ -1573,13 +2050,12 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           ),
           const SizedBox(height: 14),
           _captureStep(
-            'End Point Video',
-            'Capture End-Point Video',
+            'End Point Photo',
+            'Capture End-Point Photo',
             end,
             slot: 'end_point',
             enabled: !_saving && end == null,
-            onPressed: () =>
-                _captureVideo('end_point', const Duration(minutes: 3)),
+            onPressed: () => _capturePhoto('end_point'),
           ),
           const SizedBox(height: 12),
           const Text(
@@ -1638,13 +2114,12 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           ),
           const SizedBox(height: 12),
           _captureStep(
-            'Proposed End Point Video',
-            'Capture Proposed End-Point Video',
+            'Proposed End Point Photo',
+            'Capture Proposed End-Point Photo',
             proposedEnd,
             slot: 'new_end_point',
             enabled: !_saving && proposedEnd == null,
-            onPressed: () =>
-                _captureVideo('new_end_point', const Duration(minutes: 3)),
+            onPressed: () => _capturePhoto('new_end_point'),
           ),
         ]),
         if (_routeReady)
@@ -1745,7 +2220,9 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Saved CCNs'),
         content: SizedBox(
-          width: 420,
+          width: (MediaQuery.sizeOf(dialogContext).width - 80)
+              .clamp(0.0, 420.0)
+              .toDouble(),
           child: reports.isEmpty
               ? const Text('No saved CCN reports are available offline.')
               : ListView.separated(
@@ -1783,6 +2260,7 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
       return;
     }
     setState(() {
+      _showLanding = false;
       _reportId = report['reportId']?.toString();
       _ccnId = report['ccnId']?.toString();
       _serverTaskId = report['serverTaskId']?.toString();
@@ -1881,11 +2359,17 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
     padding: const EdgeInsets.symmetric(vertical: 4),
     child: Row(
       children: [
-        SizedBox(
-          width: 110,
-          child: Text(label, style: const TextStyle(color: Colors.black54)),
+        Flexible(
+          flex: 2,
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.black54),
+          ),
         ),
+        const SizedBox(width: 8),
         Expanded(
+          flex: 3,
           child: Text(
             value,
             style: const TextStyle(fontWeight: FontWeight.w600),
@@ -2201,6 +2685,16 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
+                        if (record['kind'] == 'video')
+                          Text(
+                            _videoCompressionSummary(record),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.black54,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                       ],
                     ),
                   ),
@@ -2209,6 +2703,11 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      padding: EdgeInsets.zero,
                       onPressed: () => _retakeMedia(
                         resolvedSlot,
                         duration:
@@ -2225,6 +2724,11 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
                       tooltip: 'Retake',
                     ),
                     IconButton(
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
+                      ),
+                      padding: EdgeInsets.zero,
                       onPressed: () => _removeMedia(record),
                       icon: const Icon(
                         Icons.delete_outline,
@@ -2240,6 +2744,23 @@ class _CcnWorkflowScreenState extends State<CcnWorkflowScreen> {
           ),
       ],
     );
+  }
+
+  String _videoCompressionSummary(Map<String, dynamic> record) {
+    final size = int.tryParse(record['sizeBytes']?.toString() ?? '') ?? 0;
+    final originalSize =
+        int.tryParse(record['originalSizeBytes']?.toString() ?? '') ?? 0;
+    String sizeText(int bytes) => bytes >= 1024 * 1024
+        ? '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB'
+        : '${(bytes / 1024).toStringAsFixed(0)} KB';
+    if (record['videoHandling'] == 'h264_aac_compressed_max_1080p' &&
+        originalSize > 0) {
+      return '1080p max · device frame rate · ${sizeText(size)} (from ${sizeText(originalSize)})';
+    }
+    if (record['videoHandling'] == 'original_kept_compression_failed') {
+      return 'Compression failed · original kept · ${sizeText(size)}';
+    }
+    return 'Video · ${sizeText(size)}';
   }
 
   Widget _mediaGrid(List<Map<String, dynamic>> items) {

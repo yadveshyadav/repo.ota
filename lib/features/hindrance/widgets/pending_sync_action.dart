@@ -89,7 +89,7 @@ class PendingSyncAction extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: Text(
-                                  '${job.formType} · ${_stateLabel(job.state)}',
+                                  '${job.formType} · ${_stateLabel(job.state, job.phase)}',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -107,8 +107,17 @@ class PendingSyncAction extends StatelessWidget {
                                 : null,
                           ),
                           const SizedBox(height: 6),
+                          if (job.currentFile != null) ...[
+                            Text(
+                              'Current file: ${job.currentFile}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 4),
+                          ],
                           Text(
-                            '${_formatBytes(job.sentBytes)} of ${_formatBytes(job.totalBytes)} sent',
+                            '${_formatBytes(job.sentBytes)} of ${_formatBytes(job.totalBytes)} transferred',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           if (job.files.isNotEmpty) ...[
@@ -152,13 +161,20 @@ class PendingSyncAction extends StatelessWidget {
     ),
   );
 
-  static String _stateLabel(String state) => switch (state) {
-    'QUEUED' => 'Waiting to resume',
-    'SYNCING' => 'Uploading',
-    'COMPLETE' => 'Complete',
-    'FAILED' => 'Needs retry',
-    _ => state,
-  };
+  static String _stateLabel(String state, String phase) {
+    if (state == 'COMPLETE') return 'Complete';
+    if (state == 'FAILED') return 'Needs retry';
+    return switch (phase.toUpperCase()) {
+      'CREATING_TASK' => 'Preparing task',
+      'UPLOADING' => 'Uploading media',
+      'SAVING' => 'Saving response',
+      'SUBMITTING' => 'Submitting response',
+      'COMPLETE' => 'Complete',
+      'FAILED' || 'SYNC_FAILED' => 'Needs retry',
+      'QUEUED' => 'Waiting to resume',
+      _ => state == 'SYNCING' ? 'Syncing' : state,
+    };
+  }
 
   static String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:hero_app/features/hindrance/data/hindrance_local_store.dart';
 import 'package:hero_app/models/task_model.dart';
 import 'package:hero_app/models/task_master_snapshots.dart';
@@ -40,6 +41,9 @@ class HindranceRouteGroup {
 /// therefore is not a source for all Blocks that can be used for a Hindrance.
 class HindranceTaskDataSource {
   static final Map<String, Future<HindranceTaskData>> _loads = {};
+  static final Map<String, DateTime> _loadedAt = {};
+  static const _loadCacheTtl = Duration(minutes: 5);
+  static const _masterCacheKey = 'hindrance_master_blocks_v1';
 
   HindranceTaskDataSource({TaskApiService? api, HindranceLocalStore? store})
     : _api = api ?? TaskApiService(),
@@ -257,14 +261,57 @@ class HindranceTaskDataSource {
   /// Returns the last successful account snapshot without starting or waiting
   /// for a network request. Used to render Hindrance immediately offline.
   Future<HindranceTaskData> loadCached(String ownerId) async {
-    final cached = await _store.loadTasks(ownerId);
+    final cached = (await _store.loadTasks(
+      ownerId,
+    )).map(TaskModel.fromJson).where((task) => task.id.isNotEmpty).toList();
+    final masterCache = await _store.loadCache(
+      ownerId: ownerId,
+      cacheKey: _masterCacheKey,
+    );
+    final payload = masterCache?.payload;
+    if (payload is! List) {
+      return HindranceTaskData(tasks: cached, fromCache: true);
+    }
+    final master = payload
+        .whereType<Map>()
+        .map((task) => TaskModel.fromJson(task))
+        .where((task) => task.id.isNotEmpty)
+        .toList();
     return HindranceTaskData(
-      tasks: cached
-          .map(TaskModel.fromJson)
-          .where((task) => task.id.isNotEmpty)
-          .toList(),
+      tasks: _mergeCachedHierarchies(master, cached),
       fromCache: true,
     );
+  }
+
+  List<TaskModel> _mergeCachedHierarchies(
+    List<TaskModel> master,
+    List<TaskModel> cached,
+  ) {
+    final cachedById = {for (final task in cached) task.id: task};
+    return master.map((block) {
+      final snapshot = cachedById[block.id];
+      if (snapshot?.routeSnapshot?.routes.isNotEmpty != true) return block;
+      return TaskModel(
+        id: block.id,
+        taskCode: block.taskCode,
+        displayName: block.displayName,
+        taskType: block.taskType,
+        taskLevel: block.taskLevel,
+        taskLevelProvided: block.taskLevelProvided,
+        status: block.status,
+        taskStage: block.taskStage,
+        approvalStatus: block.approvalStatus,
+        parentTaskId: block.parentTaskId,
+        ancestors: block.ancestors,
+        depth: block.depth,
+        rootTaskId: block.rootTaskId,
+        locationCode: block.locationCode,
+        locationSnapshot: block.locationSnapshot,
+        routeSnapshot: snapshot!.routeSnapshot,
+        totalLengthKm: snapshot.totalLengthKm,
+        meta: {...?block.meta, ...?snapshot.meta},
+      );
+    }).toList();
   }
 
   /// Persists only one selected Block and its descendant Ring/Segment tasks.
@@ -314,9 +361,38 @@ class HindranceTaskDataSource {
     );
   }
 
-  Future<HindranceTaskData> load(String ownerId, {bool forceRefresh = false}) {
-    if (forceRefresh || !_loads.containsKey(ownerId)) {
-      _loads[ownerId] = _fetch(ownerId);
+  Future<HindranceTaskData> load(
+    String ownerId, {
+    bool forceRefresh = false,
+  }) async {
+    final loadedAt = _loadedAt[ownerId];
+    final cacheIsFresh =
+        loadedAt != null && DateTime.now().difference(loadedAt) < _loadCacheTtl;
+    if (!forceRefresh && _loads.containsKey(ownerId) && loadedAt == null) {
+      return _loads[ownerId]!;
+    }
+    if (!forceRefresh && cacheIsFresh && _loads.containsKey(ownerId)) {
+      final memorySnapshot = await _loads[ownerId]!;
+      final localSnapshot = await loadCached(ownerId);
+      if (localSnapshot.tasks.isNotEmpty) {
+        return HindranceTaskData(
+          tasks: localSnapshot.tasks,
+          fromCache: memorySnapshot.fromCache,
+          hasMore: memorySnapshot.hasMore,
+          nextPage: memorySnapshot.nextPage,
+        );
+      }
+      return memorySnapshot;
+    }
+    if (forceRefresh || !_loads.containsKey(ownerId) || !cacheIsFresh) {
+      final pending = _fetch(ownerId);
+      _loads[ownerId] = pending;
+      unawaited(
+        pending.then<void>(
+          (_) => _loadedAt[ownerId] = DateTime.now(),
+          onError: (Object _) {},
+        ),
+      );
     }
     return _loads[ownerId]!;
   }
@@ -332,43 +408,23 @@ class HindranceTaskDataSource {
       final cached = (await _store.loadTasks(
         ownerId,
       )).map(TaskModel.fromJson).where((task) => task.id.isNotEmpty).toList();
-      final cachedById = {for (final task in cached) task.id: task};
       final master = await _loadMasterBlocks();
-      // LOCATION master data has no BoQ routes. Overlay only previously
-      // downloaded route hierarchies onto the matching live Block rows.
-      final tasks = master.map((block) {
-        final snapshot = cachedById[block.id];
-        if (snapshot?.routeSnapshot?.routes.isNotEmpty != true) return block;
-        return TaskModel(
-          id: block.id,
-          taskCode: block.taskCode,
-          displayName: block.displayName,
-          taskType: block.taskType,
-          taskLevel: block.taskLevel,
-          taskLevelProvided: block.taskLevelProvided,
-          status: block.status,
-          taskStage: block.taskStage,
-          approvalStatus: block.approvalStatus,
-          parentTaskId: block.parentTaskId,
-          ancestors: block.ancestors,
-          depth: block.depth,
-          rootTaskId: block.rootTaskId,
-          locationCode: block.locationCode,
-          locationSnapshot: block.locationSnapshot,
-          routeSnapshot: snapshot!.routeSnapshot,
-          totalLengthKm: snapshot.totalLengthKm,
-          meta: {...?block.meta, ...?snapshot.meta},
+      try {
+        await _store.saveCache(
+          ownerId: ownerId,
+          cacheKey: _masterCacheKey,
+          payload: master.map((task) => task.toJson()).toList(),
         );
-      }).toList();
+      } catch (_) {
+        // A cache write failure must not discard fresh master data.
+      }
+      final tasks = _mergeCachedHierarchies(master, cached);
       return HindranceTaskData(tasks: tasks, fromCache: false);
     } catch (_) {
-      final cached = await _store.loadTasks(ownerId);
+      final cached = await loadCached(ownerId);
       return HindranceTaskData(
-        tasks: cached
-            .map(TaskModel.fromJson)
-            .where((task) => task.id.isNotEmpty)
-            .toList(),
-        fromCache: true,
+        tasks: cached.tasks,
+        fromCache: cached.tasks.isNotEmpty,
       );
     }
   }
@@ -400,12 +456,14 @@ class HindranceTaskDataSource {
     if (routeData == null ||
         routeResponse is! Map ||
         routeResponse['success'] != true) {
-      throw StateError('Dev did not return the approved BoQ routes.');
+      throw StateError(
+        'The task service did not return the approved BoQ routes.',
+      );
     }
     final responseBlockId = routeData['blockId']?.toString();
     if (responseBlockId != null && responseBlockId != blockId) {
       throw StateError(
-        'Dev returned BoQ routes for Block $responseBlockId instead of $blockId.',
+        'The task service returned BoQ routes for Block $responseBlockId instead of $blockId.',
       );
     }
     final routes = (routeData['routes'] as List? ?? const [])
@@ -475,7 +533,7 @@ class HindranceTaskDataSource {
         if (plansResponse is Map && plansResponse['success'] == false) {
           throw StateError(
             plansResponse['message']?.toString() ??
-                'Dev could not load BoQ plans for ${block.displayName}.',
+                'Could not load BoQ plans for ${block.displayName}.',
           );
         }
         final plansData = _dataMap(plansResponse);
@@ -499,7 +557,7 @@ class HindranceTaskDataSource {
           if (revisionResponse is Map && revisionResponse['success'] == false) {
             throw StateError(
               revisionResponse['message']?.toString() ??
-                  'Dev could not load BoQ revisions for ${block.displayName}.',
+                  'Could not load BoQ revisions for ${block.displayName}.',
             );
           }
           final revisionData = _dataMap(revisionResponse);
@@ -550,7 +608,9 @@ class HindranceTaskDataSource {
     final rawBlocks = data?['blocks'];
     final rawCircles = data?['circles'];
     if (data == null || rawDistricts is! Map || rawBlocks is! Map) {
-      throw StateError('Dev returned an invalid master-data hierarchy.');
+      throw StateError(
+        'The task service returned an invalid master-data hierarchy.',
+      );
     }
     final circleByDistrict = <String, String>{};
     for (final entry in rawDistricts.entries) {
@@ -614,7 +674,7 @@ class HindranceTaskDataSource {
     }.values.toList();
     uniqueTasks.sort((a, b) => a.displayName.compareTo(b.displayName));
     if (uniqueTasks.isEmpty) {
-      throw StateError('Dev master data did not include any Blocks.');
+      throw StateError('Task master data did not include any Blocks.');
     }
     return uniqueTasks;
   }

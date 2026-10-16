@@ -14,7 +14,8 @@ class AuthApiService {
   bool lastLoginWasIlYnc = false;
   String activeAuthBaseUrl = AppConstants.ilyncApiBaseUrl;
 
-  /// Prefer HERO sign-in for the fleet app, then fall back to IlYnc UAT.
+  /// Prefer HERO sign-in for the fleet app, then fall back to the selected
+  /// IlYnc environment (Dev, UAT, or Prod).
   Future<Map<String, dynamic>> login({
     required String username,
     required String password,
@@ -53,14 +54,16 @@ class AuthApiService {
         lastLoginWasIlYnc = true;
         activeAuthBaseUrl = AppConstants.ilyncApiBaseUrl;
         if (kDebugMode) {
-          print('[AuthApiService] UAT sign-in succeeded.');
+          print(
+            '[AuthApiService] IlYnc ${AppConstants.ilyncEnvironment.toUpperCase()} sign-in succeeded.',
+          );
         }
         return response;
       }
       throw const FormatException('UAT login returned no access token.');
     } catch (uatError) {
       throw Exception(
-        'Unable to sign in. HERO login failed ($heroError); UAT login failed ($uatError).',
+        'Unable to sign in. HERO login failed ($heroError); IlYnc ${AppConstants.ilyncEnvironment.toUpperCase()} login failed ($uatError).',
       );
     }
   }

@@ -9,6 +9,8 @@ class PendingSyncJob {
   final int totalBytes;
   final int sentBytes;
   final String state;
+  final String phase;
+  final String? currentFile;
   final String? error;
 
   const PendingSyncJob({
@@ -18,6 +20,8 @@ class PendingSyncJob {
     required this.totalBytes,
     required this.sentBytes,
     required this.state,
+    this.phase = 'QUEUED',
+    this.currentFile,
     this.error,
   });
 
@@ -30,6 +34,9 @@ class PendingSyncJob {
     List<String>? files,
     int? sentBytes,
     String? state,
+    String? phase,
+    String? currentFile,
+    bool clearCurrentFile = false,
     String? error,
     bool clearError = false,
   }) => PendingSyncJob(
@@ -39,6 +46,8 @@ class PendingSyncJob {
     totalBytes: totalBytes ?? this.totalBytes,
     sentBytes: sentBytes ?? this.sentBytes,
     state: state ?? this.state,
+    phase: phase ?? this.phase,
+    currentFile: clearCurrentFile ? null : currentFile ?? this.currentFile,
     error: clearError ? null : error ?? this.error,
   );
 }
@@ -96,6 +105,8 @@ class PendingSyncManager {
           totalBytes: totalBytes,
           sentBytes: sentBytes.clamp(0, totalBytes).toInt(),
           state: state == 'SYNC_FAILED' ? 'FAILED' : 'QUEUED',
+          phase: report['syncPhase']?.toString() ?? state,
+          currentFile: report['syncCurrentFile']?.toString(),
           error:
               report['syncError']?.toString() ??
               (state == 'SYNC_FAILED'
@@ -131,6 +142,7 @@ class PendingSyncManager {
             totalBytes: totalBytes,
             files: files,
             state: 'SYNCING',
+            phase: 'QUEUED',
             sentBytes: 0,
             clearError: true,
           ) ??
@@ -141,6 +153,7 @@ class PendingSyncManager {
             totalBytes: totalBytes,
             sentBytes: 0,
             state: 'SYNCING',
+            phase: 'QUEUED',
           ),
     );
     unawaited(_run(id, totalBytes, run));
@@ -148,11 +161,36 @@ class PendingSyncManager {
 
   bool canRetry(String id) => !_active.contains(id) && _runners.containsKey(id);
 
+  void updateDetails(
+    String id, {
+    required String phase,
+    String? currentFile,
+    bool clearCurrentFile = false,
+  }) {
+    final current = _find(id);
+    if (current == null) return;
+    _put(
+      current.copyWith(
+        phase: phase,
+        currentFile: currentFile,
+        clearCurrentFile: clearCurrentFile,
+      ),
+    );
+  }
+
   void retry(String id) {
     final runner = _runners[id];
     final current = _find(id);
     if (runner == null || current == null || !_active.add(id)) return;
-    _put(current.copyWith(state: 'SYNCING', sentBytes: 0, clearError: true));
+    _put(
+      current.copyWith(
+        state: 'SYNCING',
+        sentBytes: 0,
+        phase: 'QUEUED',
+        clearCurrentFile: true,
+        clearError: true,
+      ),
+    );
     unawaited(_run(id, current.totalBytes, runner));
   }
 
@@ -165,17 +203,36 @@ class PendingSyncManager {
       await run((count) async {
         final current = _find(id);
         if (current == null) return;
-        _put(current.copyWith(sentBytes: current.sentBytes + count));
+        _put(
+          current.copyWith(
+            sentBytes: (current.sentBytes + count)
+                .clamp(0, current.totalBytes)
+                .toInt(),
+          ),
+        );
       });
       final current = _find(id);
       if (current != null) {
-        _put(current.copyWith(sentBytes: totalBytes, state: 'COMPLETE'));
+        _put(
+          current.copyWith(
+            sentBytes: totalBytes,
+            state: 'COMPLETE',
+            phase: 'COMPLETE',
+            clearCurrentFile: true,
+          ),
+        );
       }
       _runners.remove(id);
     } catch (error) {
       final current = _find(id);
       if (current != null) {
-        _put(current.copyWith(state: 'FAILED', error: error.toString()));
+        _put(
+          current.copyWith(
+            state: 'FAILED',
+            phase: 'FAILED',
+            error: error.toString(),
+          ),
+        );
       }
     } finally {
       _active.remove(id);

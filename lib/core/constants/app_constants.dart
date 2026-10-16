@@ -35,15 +35,20 @@ abstract class AppConstants {
   // Base URLs & API Endpoints
   static const String devApiBaseUrl = 'https://dev.ilync.tech';
   static const String uatApiBaseUrl = 'https://uat.ilync.tech';
-  /// Set with `--dart-define=ILYNC_ENV=dev` or `ILYNC_ENV=uat`.
+  static const String prodApiBaseUrl = 'https://ilync.tech';
+
+  /// Set with `--dart-define=ILYNC_ENV=dev|uat|prod`.
   /// Defaults to UAT so ordinary local/release builds retain current behavior.
   static const String ilyncEnvironment = String.fromEnvironment(
     'ILYNC_ENV',
     defaultValue: 'uat',
   );
   static const bool ilyncIsDev = ilyncEnvironment == 'dev';
+  static const bool ilyncIsProd = ilyncEnvironment == 'prod';
   static const String ilyncApiBaseUrl = ilyncIsDev
       ? devApiBaseUrl
+      : ilyncIsProd
+      ? prodApiBaseUrl
       : uatApiBaseUrl;
   static const String productionAuthBaseUrl = 'https://hero.pramaanu.co.in';
   //static const String defaultBaseUrl = 'https://27qxnvkh-3000.inc1.devtunnels.ms';
