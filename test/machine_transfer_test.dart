@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hero_app/features/machine_transfer/controller/machine_transfer_controller.dart';
 import 'package:hero_app/models/machine.dart';
+import 'package:hero_app/models/machine_response.dart';
+import 'package:hero_app/models/vendor_response.dart';
 import 'package:hero_app/models/machine_movement.dart';
 import 'package:hero_app/repositories/machine_movement_repository.dart';
 import 'package:hero_app/repositories/machine_repository.dart';
@@ -10,14 +12,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late MockMachineMovementRepository movementRepo;
-  late MockMachineRepository machineRepo;
-  late MockVendorRepository vendorRepo;
+  late MachineRepository machineRepo;
+  late VendorRepository vendorRepo;
   late MachineTransferController controller;
 
   setUp(() {
     movementRepo = MockMachineMovementRepository();
-    machineRepo = MockMachineRepository();
-    vendorRepo = MockVendorRepository();
+    machineRepo = _MachineTransferTestMachineRepository();
+    vendorRepo = _MachineTransferTestVendorRepository();
 
     controller = MachineTransferController(
       movementRepository: movementRepo,
@@ -88,9 +90,12 @@ void main() {
   group('One-Pager Form Validation Rules', () {
     test('Validation fails if Point A equals Point B', () async {
       await controller.initOnePagerForm();
-      if (controller.availableMachines.isNotEmpty) {
-        controller.selectMachine(controller.availableMachines.first);
-      }
+      expect(controller.availableVendors, isNotEmpty);
+      expect(controller.availableReasons, isNotEmpty);
+      controller.setSelectedVendor(controller.availableVendors.first);
+      expect(controller.availableMachines, isNotEmpty);
+      controller.selectMachine(controller.availableMachines.first);
+      controller.setSelectedReason(controller.availableReasons.first);
 
       controller.setAPoint('Jaipur Site');
       controller.setBPoint('Jaipur Site');
@@ -105,13 +110,12 @@ void main() {
   group('Full Field Shifter Lifecycle & Actions', () {
     test('Start shifting, shifter updates, and mark shifted with photo', () async {
       await controller.initOnePagerForm();
-
-      final freeMachine = const Machine(
-        machineChassisNo: '600202608412',
-        modelName: 'A600 HDD',
-        siteName: 'Sujangarh-SITE',
-      );
-      controller.selectMachine(freeMachine);
+      expect(controller.availableVendors, isNotEmpty);
+      expect(controller.availableReasons, isNotEmpty);
+      controller.setSelectedVendor(controller.availableVendors.first);
+      expect(controller.availableMachines, isNotEmpty);
+      controller.selectMachine(controller.availableMachines.first);
+      controller.setSelectedReason(controller.availableReasons.first);
 
       controller.setAPoint('Point A Site');
       controller.setBPoint('Point B Destination');
@@ -143,4 +147,61 @@ void main() {
       expect(controller.activeTransfer?.machinePictureUrl, contains('rig_photo'));
     });
   });
+}
+
+
+class _MachineTransferTestMachineRepository implements MachineRepository {
+  static const _machine = Machine(
+    id: '412',
+    machineChassisNo: '600202608412',
+    modelName: 'A600 HDD',
+    siteName: 'Sujangarh-SITE',
+    vendorName: 'Test Vendor',
+  );
+
+  @override
+  Future<MachineResponse> getMachines() async => const MachineResponse(
+        success: true,
+        machines: [_machine],
+        total: 1,
+      );
+
+  @override
+  Future<List<Machine>> getAllMachines() async => const [_machine];
+
+  @override
+  Future<List<Machine>> getFilteredMachines({
+    String? searchQuery,
+    String? statusFilter,
+    String? typeFilter,
+    String? locationFilter,
+  }) async => const [_machine];
+}
+
+class _MachineTransferTestVendorRepository implements VendorRepository {
+  static const _vendor = Vendor(
+    id: 'test-vendor',
+    vendorName: 'Test Vendor',
+    contactPerson: 'Test Contact',
+    assignedMachines: [
+      {'machine_chassis_no': '600202608412'},
+    ],
+  );
+
+  @override
+  Future<VendorResponse> getVendors({
+    int page = 0,
+    int size = 10,
+    String search = '',
+    bool allowMockFallback = true,
+  }) async =>
+      VendorResponse(
+        vendors: const [_vendor],
+        totalCount: 1,
+        totalPages: 1,
+        currentPage: page,
+        pageSize: size,
+        hasNext: false,
+        hasPrevious: page > 0,
+      );
 }
