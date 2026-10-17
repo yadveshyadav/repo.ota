@@ -114,7 +114,8 @@ void main() {
 
     // Tap Sign In button without filling fields
     await tester.tap(signInButtonFinder);
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
     // Verify validation error messages are displayed
     expect(find.text(AppConstants.emailRequired), findsOneWidget);
@@ -133,7 +134,8 @@ void main() {
       ),
     );
 
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
     // Verify no RenderFlex overflow occurs on small screen dimensions
     expect(tester.takeException(), isNull);
