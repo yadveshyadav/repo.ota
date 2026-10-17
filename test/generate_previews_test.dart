@@ -13,11 +13,14 @@ void main() {
     tester.view.physicalSize = const Size(1170, 2532);
     tester.view.devicePixelRatio = 3.0;
 
-    final artifactsDir = Directory(
-        'C:/Users/yadve/AppData/Local/Google/AndroidStudio2026.1.4/projects/hero_app.3b3a28cf/.artifacts/ff0e1f30-90d8-4eb5-8fa9-32ec7f7e3019');
-    if (!artifactsDir.existsSync()) {
-      artifactsDir.createSync(recursive: true);
-    }
+    final artifactsDir = Directory.systemTemp.createTempSync(
+      'hero_screen_previews_',
+    );
+    addTearDown(() {
+      if (artifactsDir.existsSync()) {
+        artifactsDir.deleteSync(recursive: true);
+      }
+    });
 
     // 1. Capture Splash Screen
     final boundaryKeySplash = GlobalKey();
@@ -52,7 +55,8 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
 
     final boundaryLogin = boundaryKeyLogin.currentContext!
         .findRenderObject() as RenderRepaintBoundary;
