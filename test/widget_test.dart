@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hero_app/app/app.dart';
 import 'package:hero_app/core/constants/app_constants.dart';
 import 'package:hero_app/features/auth/presentation/screens/login_screen.dart';
 import 'package:hero_app/features/auth/presentation/screens/splash_screen.dart';
@@ -15,7 +14,11 @@ void main() {
   });
   testWidgets('1. Splash screen renders HERO branding and tagline',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const HeroApp());
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SplashScreen(checkForUpdatesOnLaunch: false),
+      ),
+    );
 
     // Verify SplashScreen is displayed
     expect(find.byType(SplashScreen), findsOneWidget);
@@ -34,7 +37,11 @@ void main() {
       (WidgetTester tester) async {
     // Preferences are reset in setUp. Avoid clearSession() here because it also
     // calls attendance-storage plugins that are not registered in widget tests.
-    await tester.pumpWidget(const HeroApp());
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SplashScreen(checkForUpdatesOnLaunch: false),
+      ),
+    );
 
     expect(find.byType(SplashScreen), findsOneWidget);
 
