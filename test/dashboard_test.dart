@@ -78,7 +78,8 @@ void main() {
     expect(find.byType(SummaryCardsRow), findsOneWidget);
     await tester.ensureVisible(find.text('BREAKDOWN'));
     await tester.tap(find.text('BREAKDOWN'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
 
     expect(find.text('Breakdown route reached'), findsOneWidget);
   });
