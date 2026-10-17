@@ -24,7 +24,9 @@ void main() {
     expect(find.text(AppConstants.taglineLine1), findsOneWidget);
     expect(find.text(AppConstants.taglineLine2), findsOneWidget);
 
-    await tester.pumpAndSettle(const Duration(milliseconds: 3500));
+    await tester.pump(const Duration(milliseconds: 3700));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
   });
 
   testWidgets('2. Splash screen navigates to Login screen after animation',
@@ -35,7 +37,9 @@ void main() {
     expect(find.byType(SplashScreen), findsOneWidget);
 
     // Fast-forward time past splash screen duration (3200ms)
-    await tester.pumpAndSettle(const Duration(milliseconds: 3500));
+    await tester.pump(const Duration(milliseconds: 3700));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
 
     // Verify transition to LoginScreen
     expect(find.byType(LoginScreen), findsOneWidget);
