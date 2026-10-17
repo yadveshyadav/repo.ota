@@ -182,7 +182,8 @@ void main() {
       final signInButton = find.text('Sign In');
       await tester.ensureVisible(signInButton);
       await tester.tap(signInButton);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
       // Expect validation error
       expect(find.text('Please enter your email or username'), findsOneWidget);
