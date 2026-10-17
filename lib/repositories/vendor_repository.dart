@@ -10,6 +10,7 @@ abstract class VendorRepository {
     int page = 0,
     int size = 10,
     String search = '',
+    bool allowMockFallback = true,
   });
 }
 
@@ -18,14 +19,15 @@ class ApiVendorRepository implements VendorRepository {
   final VendorApiService apiService;
 
   ApiVendorRepository({ApiClient? apiClient, VendorApiService? apiService})
-      : apiService = apiService ??
-            VendorApiService(apiClient: apiClient ?? ApiClient());
+    : apiService =
+          apiService ?? VendorApiService(apiClient: apiClient ?? ApiClient());
 
   @override
   Future<VendorResponse> getVendors({
     int page = 0,
     int size = 10,
     String search = '',
+    bool allowMockFallback = true,
   }) async {
     try {
       return await apiService.fetchVendors(
@@ -34,13 +36,17 @@ class ApiVendorRepository implements VendorRepository {
         search: search,
       );
     } catch (e) {
+      if (!allowMockFallback) rethrow;
       if (kDebugMode) {
-        print('[ApiVendorRepository] Error fetching vendors ($e), falling back to mock dataset.');
+        print(
+          '[ApiVendorRepository] Error fetching vendors ($e), falling back to mock dataset.',
+        );
       }
       return MockVendorRepository().getVendors(
         page: page,
         size: size,
         search: search,
+        allowMockFallback: false,
       );
     }
   }
@@ -60,10 +66,18 @@ class MockVendorRepository implements VendorRepository {
       'district': 'CHURU',
       'status': 'ACTIVE',
       'users': [
-        {'name': 'Satyanarayan Rajpurohit', 'mobile': '9664115330', 'designation': 'VENDOR'},
-        {'name': 'Rakesh karwasra', 'mobile': '9116485564', 'designation': 'OPERATOR'},
-        {'name': 'Balaram', 'mobile': '8955011301', 'designation': 'TRACKER'}
-      ]
+        {
+          'name': 'Satyanarayan Rajpurohit',
+          'mobile': '9664115330',
+          'designation': 'VENDOR',
+        },
+        {
+          'name': 'Rakesh karwasra',
+          'mobile': '9116485564',
+          'designation': 'OPERATOR',
+        },
+        {'name': 'Balaram', 'mobile': '8955011301', 'designation': 'TRACKER'},
+      ],
     }),
     Vendor.fromJson({
       'id': '6aa7732712381cfcdf6a1ed6',
@@ -76,9 +90,17 @@ class MockVendorRepository implements VendorRepository {
       'district': 'GANGANAGAR',
       'status': 'ACTIVE',
       'users': [
-        {'name': 'Mohit Jakhar', 'mobile': '9024065621', 'designation': 'VENDOR'},
-        {'name': 'Pintu Kumar', 'mobile': '9507535074', 'designation': 'OPERATOR'}
-      ]
+        {
+          'name': 'Mohit Jakhar',
+          'mobile': '9024065621',
+          'designation': 'VENDOR',
+        },
+        {
+          'name': 'Pintu Kumar',
+          'mobile': '9507535074',
+          'designation': 'OPERATOR',
+        },
+      ],
     }),
     Vendor.fromJson({
       'id': '6a7c2b4f8e16e804697f18b0',
@@ -180,6 +202,7 @@ class MockVendorRepository implements VendorRepository {
     int page = 0,
     int size = 10,
     String search = '',
+    bool allowMockFallback = true,
   }) async {
     await Future.delayed(const Duration(milliseconds: 100));
     final filtered = _mockVendors.where((v) {
@@ -192,9 +215,13 @@ class MockVendorRepository implements VendorRepository {
     }).toList();
 
     final startIndex = page * size;
-    final endIndex = (startIndex + size) < filtered.length ? startIndex + size : filtered.length;
+    final endIndex = (startIndex + size) < filtered.length
+        ? startIndex + size
+        : filtered.length;
 
-    final pagedList = startIndex < filtered.length ? filtered.sublist(startIndex, endIndex) : <Vendor>[];
+    final pagedList = startIndex < filtered.length
+        ? filtered.sublist(startIndex, endIndex)
+        : <Vendor>[];
     final totalPages = (18 / size).ceil();
 
     return VendorResponse(

@@ -4,6 +4,7 @@ import 'package:hero_app/app/routes.dart';
 import 'package:hero_app/core/theme/app_colors.dart';
 import 'package:hero_app/core/theme/app_text_styles.dart';
 import 'package:hero_app/features/attendance/controller/attendance_controller.dart';
+import 'package:hero_app/features/attendance/muster/daily_muster_screen.dart';
 import 'package:hero_app/features/auth/models/user_model.dart';
 import 'package:hero_app/features/auth/services/auth_storage_service.dart';
 import 'package:hero_app/models/machine.dart';
@@ -706,6 +707,27 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                             ],
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Daily Muster is a separate task-based workforce flow;
+                      // keep the existing machine/team check-ins untouched.
+                      Card(
+                        child: ListTile(
+                          leading: const CircleAvatar(
+                            child: Icon(Icons.fact_check_outlined),
+                          ),
+                          title: const Text('Daily Muster'),
+                          subtitle: const Text(
+                            'Record today’s workforce attendance against an assigned block task',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const DailyMusterScreen(),
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 20),
 

@@ -17,9 +17,10 @@ class MachineTransferController extends ChangeNotifier {
     MachineMovementRepository? movementRepository,
     MachineRepository? machineRepository,
     VendorRepository? vendorRepository,
-  })  : movementRepository = movementRepository ?? ApiMachineMovementRepository(),
-        machineRepository = machineRepository ?? ApiMachineRepository(),
-        vendorRepository = vendorRepository ?? ApiVendorRepository();
+  }) : movementRepository =
+           movementRepository ?? ApiMachineMovementRepository(),
+       machineRepository = machineRepository ?? ApiMachineRepository(),
+       vendorRepository = vendorRepository ?? ApiVendorRepository();
 
   // One-Pager Form State
   Machine? _selectedMachine;
@@ -27,14 +28,14 @@ class MachineTransferController extends ChangeNotifier {
   MachineShiftReason? _selectedReason;
 
   String _aPointName = '';
-  double _aPointLatitude = 27.8129;
-  double _aPointLongitude = 74.5036;
+  double? _aPointLatitude;
+  double? _aPointLongitude;
 
   String _bPointName = '';
-  double _bPointLatitude = 28.0825;
-  double _bPointLongitude = 74.6189;
+  double? _bPointLatitude;
+  double? _bPointLongitude;
 
-  String _requiredDate = '2026-09-27';
+  String _requiredDate = '';
   String _modeOfShifting = 'OWN_HDD'; // OWN_HDD or BY_TRUCK
 
   // Dynamic Lists
@@ -50,6 +51,8 @@ class MachineTransferController extends ChangeNotifier {
   bool _isSubmitting = false;
   String? _errorMessage;
   String? _successMessage;
+  int _unmatchedAssignmentCount = 0;
+  bool _catalogLoadFailed = false;
 
   // Getters
   Machine? get selectedMachine => _selectedMachine;
@@ -57,19 +60,20 @@ class MachineTransferController extends ChangeNotifier {
   MachineShiftReason? get selectedReason => _selectedReason;
 
   String get aPointName => _aPointName;
-  double get aPointLatitude => _aPointLatitude;
-  double get aPointLongitude => _aPointLongitude;
+  double? get aPointLatitude => _aPointLatitude;
+  double? get aPointLongitude => _aPointLongitude;
 
   String get bPointName => _bPointName;
-  double get bPointLatitude => _bPointLatitude;
-  double get bPointLongitude => _bPointLongitude;
+  double? get bPointLatitude => _bPointLatitude;
+  double? get bPointLongitude => _bPointLongitude;
 
   String get requiredDate => _requiredDate;
   String get modeOfShifting => _modeOfShifting;
 
   List<Machine> get availableMachines => List.unmodifiable(_availableMachines);
   List<Vendor> get availableVendors => List.unmodifiable(_availableVendors);
-  List<MachineShiftReason> get availableReasons => List.unmodifiable(_availableReasons);
+  List<MachineShiftReason> get availableReasons =>
+      List.unmodifiable(_availableReasons);
   List<MachineMovement> get transfersList => List.unmodifiable(_transfersList);
 
   MachineMovement? get activeTransfer => _activeTransfer;
@@ -77,54 +81,92 @@ class MachineTransferController extends ChangeNotifier {
   bool get isSubmitting => _isSubmitting;
   String? get errorMessage => _errorMessage;
   String? get successMessage => _successMessage;
+  int get unmatchedAssignmentCount => _unmatchedAssignmentCount;
+  bool get catalogLoadFailed => _catalogLoadFailed;
 
   /// Initialize One-Pager Form dependencies
   Future<void> initOnePagerForm({Machine? preSelectedMachine}) async {
     _isLoading = true;
+    _catalogLoadFailed = false;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      _allMachines = await machineRepository.getAllMachines();
+      // Load independent catalogs together so the form does not wait for each
+      // API request to finish in sequence.
+      final catalogs = await Future.wait<dynamic>([
+        machineRepository.getMachines(),
+        vendorRepository.getVendors(size: 50, allowMockFallback: false),
+        movementRepository.getReasons(),
+      ]);
+      final machineResponse = catalogs[0] as dynamic;
+      if (machineResponse.success != true) {
+        throw Exception(
+          'Could not load the live machine inventory. Please retry.',
+        );
+      }
+      _allMachines = List<Machine>.from(machineResponse.machines as List);
+      final vendorResp = catalogs[1] as dynamic;
+      final vendors = List<Vendor>.from(vendorResp.vendors as List);
       final user = AuthStorageService().currentUser;
-
-      if (user != null && user.isVendorUser && user.vendors.isNotEmpty) {
-        final vendorNames = user.vendors
-            .map((v) => v['name']?.toString().toLowerCase())
-            .whereType<String>()
-            .toSet();
-
-        final filtered = _allMachines.where((m) {
-          final mVendor = m.vendorName?.toLowerCase();
-          if (mVendor == null) return false;
-          return vendorNames.contains(mVendor) || vendorNames.any((v) => mVendor.contains(v));
+      if (user != null && user.isVendorUser) {
+        final vendorIds = <String>{
+          if (user.vendorId != null) user.vendorId!,
+          ...user.vendors.map((item) => item['id']?.toString()).whereType<String>(),
+        };
+        final vendorNames = <String>{
+          if (user.vendorName != null) _normalizeMachineKey(user.vendorName!),
+          if (user.vendorDetails?['name'] != null)
+            _normalizeMachineKey(user.vendorDetails!['name'].toString()),
+          ...user.vendors
+              .map((item) => item['name']?.toString())
+              .whereType<String>()
+              .map(_normalizeMachineKey),
+        };
+        _availableVendors = vendors.where((vendor) {
+          return vendorIds.contains(vendor.id) ||
+              vendorNames.contains(_normalizeMachineKey(vendor.vendorName));
         }).toList();
-
-        _availableMachines = filtered.isNotEmpty ? filtered : _allMachines;
       } else {
-        _availableMachines = _allMachines;
+        _availableVendors = vendors;
       }
-
-      final vendorResp = await vendorRepository.getVendors(size: 50);
-      _availableVendors = vendorResp.vendors;
-
-      _availableReasons = await movementRepository.getReasons();
-      if (_availableReasons.isNotEmpty) {
-        _selectedReason = _availableReasons.first;
-      }
+      _availableReasons = List<MachineShiftReason>.from(catalogs[2] as List);
+      _catalogLoadFailed = false;
+      _availableMachines = [];
+      _selectedMachine = null;
+      _selectedVendor = null;
+      _selectedReason = null;
+      _unmatchedAssignmentCount = 0;
 
       if (preSelectedMachine != null) {
-        selectMachine(preSelectedMachine);
-      } else if (_selectedMachine != null && !_availableMachines.contains(_selectedMachine)) {
-        _selectedMachine = _availableMachines.isNotEmpty ? _availableMachines.first : null;
+        final machineKey = _normalizeMachineKey(
+          preSelectedMachine.chassisNumber,
+        );
+        for (final vendor in _availableVendors) {
+          final matches = _machinesForVendor(vendor);
+          final match = matches.where(
+            (m) => _normalizeMachineKey(m.chassisNumber) == machineKey,
+          );
+          if (match.isNotEmpty) {
+            _selectedVendor = vendor;
+            _availableMachines = matches;
+            _selectedMachine = match.first;
+            _aPointName = match.first.location.isNotEmpty
+                ? match.first.location
+                : 'Origin Site';
+            break;
+          }
+        }
       }
 
       final now = DateTime.now().add(const Duration(days: 1));
-      _requiredDate = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      _requiredDate =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
       _isLoading = false;
       notifyListeners();
     } catch (e) {
+      _catalogLoadFailed = true;
       _errorMessage = 'Failed to initialize form dependencies: $e';
       _isLoading = false;
       notifyListeners();
@@ -132,43 +174,68 @@ class MachineTransferController extends ChangeNotifier {
   }
 
   void selectMachine(Machine machine) {
-    _selectedMachine = machine;
-    _aPointName = machine.location.isNotEmpty ? machine.location : 'Origin Site';
-
-    if (_availableVendors.isNotEmpty) {
-      final mVendorName = machine.vendorName?.toLowerCase() ?? '';
-      try {
-        _selectedVendor = _availableVendors.firstWhere(
-          (v) => v.vendorName.toLowerCase() == mVendorName ||
-                 mVendorName.contains(v.vendorName.toLowerCase()) ||
-                 v.vendorName.toLowerCase().contains(mVendorName),
-        );
-      } catch (_) {
-        if (_selectedVendor == null && _availableVendors.isNotEmpty) {
-          _selectedVendor = _availableVendors.first;
-        }
-      }
+    if (_selectedVendor == null || !_availableMachines.contains(machine)) {
+      return;
     }
+    _selectedMachine = machine;
+    _aPointName = machine.location.isNotEmpty
+        ? machine.location
+        : 'Origin Site';
+    _aPointLatitude = null;
+    _aPointLongitude = null;
     notifyListeners();
   }
 
   void setSelectedVendor(Vendor vendor) {
     _selectedVendor = vendor;
-    if (_allMachines.isNotEmpty) {
-      final vName = vendor.vendorName.toLowerCase();
-      final filtered = _allMachines.where((m) {
-        final mVendor = m.vendorName?.toLowerCase() ?? '';
-        return mVendor == vName || mVendor.contains(vName) || vName.contains(mVendor);
-      }).toList();
-
-      if (filtered.isNotEmpty) {
-        _availableMachines = filtered;
-      } else {
-        _availableMachines = _allMachines;
-      }
-    }
+    _selectedMachine = null;
+    _aPointName = '';
+    _aPointLatitude = null;
+    _aPointLongitude = null;
+    _availableMachines = _machinesForVendor(vendor);
     notifyListeners();
   }
+
+  List<Machine> _machinesForVendor(Vendor vendor) {
+    final inventoryByKey = <String, Machine>{};
+    for (final machine in _allMachines) {
+      final key = _normalizeMachineKey(machine.chassisNumber);
+      if (key.isNotEmpty && int.tryParse(machine.id) != null) {
+        inventoryByKey[key] = machine;
+      }
+    }
+    final assignedKeys = vendor.assignedMachines
+        .map(_assignmentMachineKey)
+        .where((key) => key.isNotEmpty)
+        .toSet();
+    final matches = assignedKeys
+        .map((key) => inventoryByKey[key])
+        .whereType<Machine>()
+        .toList();
+    _unmatchedAssignmentCount = assignedKeys.length - matches.length;
+    return matches;
+  }
+
+  String _assignmentMachineKey(Map<String, dynamic> assignment) {
+    for (final field in [
+      'machineNo',
+      'machine_no',
+      'machine_chassis_no',
+      'chassis_no',
+      'chassisNumber',
+      'serial_number',
+      'serialNumber',
+      'code',
+    ]) {
+      final value = assignment[field]?.toString();
+      final key = _normalizeMachineKey(value ?? '');
+      if (key.isNotEmpty) return key;
+    }
+    return '';
+  }
+
+  String _normalizeMachineKey(String value) =>
+      value.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
   void setSelectedReason(MachineShiftReason reason) {
     _selectedReason = reason;
@@ -177,15 +244,15 @@ class MachineTransferController extends ChangeNotifier {
 
   void setAPoint(String name, {double? lat, double? lng}) {
     _aPointName = name;
-    if (lat != null) _aPointLatitude = lat;
-    if (lng != null) _aPointLongitude = lng;
+    _aPointLatitude = lat;
+    _aPointLongitude = lng;
     notifyListeners();
   }
 
   void setBPoint(String name, {double? lat, double? lng}) {
     _bPointName = name;
-    if (lat != null) _bPointLatitude = lat;
-    if (lng != null) _bPointLongitude = lng;
+    _bPointLatitude = lat;
+    _bPointLongitude = lng;
     notifyListeners();
   }
 
@@ -206,6 +273,9 @@ class MachineTransferController extends ChangeNotifier {
     }
     if (_selectedVendor == null) {
       return 'Please select a vendor.';
+    }
+    if (!_availableMachines.contains(_selectedMachine)) {
+      return 'Select a machine assigned to the selected vendor.';
     }
     if (_selectedReason == null) {
       return 'Please select shifting reason.';
@@ -241,7 +311,9 @@ class MachineTransferController extends ChangeNotifier {
     try {
       final result = await movementRepository.createRequest(
         vendorId: _selectedVendor!.id,
-        machineId: _selectedMachine!.id.isNotEmpty ? _selectedMachine!.id : _selectedMachine!.chassisNumber,
+        machineId: _selectedMachine!.id.isNotEmpty
+            ? _selectedMachine!.id
+            : _selectedMachine!.chassisNumber,
         reasonId: _selectedReason!.id,
         aPointName: _aPointName.trim(),
         aPointLatitude: _aPointLatitude,
@@ -259,7 +331,8 @@ class MachineTransferController extends ChangeNotifier {
 
       _activeTransfer = result;
       _isSubmitting = false;
-      _successMessage = 'Shift request ${result.requestId} created successfully.';
+      _successMessage =
+          'Shift request ${result.requestId} created successfully.';
       notifyListeners();
       return result;
     } catch (e) {
@@ -338,7 +411,9 @@ class MachineTransferController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _transfersList = await movementRepository.getRequests(statusFilter: statusFilter);
+      _transfersList = await movementRepository.getRequests(
+        statusFilter: statusFilter,
+      );
       _isLoading = false;
       notifyListeners();
     } catch (e) {

@@ -20,19 +20,20 @@ class MachineTransferFlowScreen extends StatefulWidget {
   });
 
   @override
-  State<MachineTransferFlowScreen> createState() => _MachineTransferFlowScreenState();
+  State<MachineTransferFlowScreen> createState() =>
+      _MachineTransferFlowScreenState();
 }
 
 class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
   late final MachineTransferController _controller;
 
   final TextEditingController _aPointController = TextEditingController();
-  final TextEditingController _aLatController = TextEditingController(text: '27.8129');
-  final TextEditingController _aLngController = TextEditingController(text: '74.5036');
+  final TextEditingController _aLatController = TextEditingController();
+  final TextEditingController _aLngController = TextEditingController();
 
   final TextEditingController _bPointController = TextEditingController();
-  final TextEditingController _bLatController = TextEditingController(text: '28.0825');
-  final TextEditingController _bLngController = TextEditingController(text: '74.6189');
+  final TextEditingController _bLatController = TextEditingController();
+  final TextEditingController _bLngController = TextEditingController();
 
   final TextEditingController _requiredDateController = TextEditingController();
 
@@ -44,7 +45,9 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
   }
 
   Future<void> _initData() async {
-    await _controller.initOnePagerForm(preSelectedMachine: widget.preSelectedMachine);
+    await _controller.initOnePagerForm(
+      preSelectedMachine: widget.preSelectedMachine,
+    );
     if (_controller.selectedMachine != null) {
       _aPointController.text = _controller.selectedMachine!.location.isNotEmpty
           ? _controller.selectedMachine!.location
@@ -83,7 +86,8 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
       },
     );
     if (picked != null) {
-      final dateStr = '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      final dateStr =
+          '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
       _requiredDateController.text = dateStr;
       _controller.setRequiredDate(dateStr);
     }
@@ -92,13 +96,13 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
   Future<void> _handleSubmit() async {
     _controller.setAPoint(
       _aPointController.text,
-      lat: double.tryParse(_aLatController.text) ?? 27.8129,
-      lng: double.tryParse(_aLngController.text) ?? 74.5036,
+      lat: double.tryParse(_aLatController.text),
+      lng: double.tryParse(_aLngController.text),
     );
     _controller.setBPoint(
       _bPointController.text,
-      lat: double.tryParse(_bLatController.text) ?? 28.0825,
-      lng: double.tryParse(_bLngController.text) ?? 74.6189,
+      lat: double.tryParse(_bLatController.text),
+      lng: double.tryParse(_bLngController.text),
     );
 
     final result = await _controller.submitOnePagerShiftRequest();
@@ -133,16 +137,55 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
           appBar: AppBar(
             backgroundColor: AppColors.headerGreen,
             foregroundColor: AppColors.white,
-            title: const Text('Machine Shifting Request', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            title: const Text(
+              'Machine Shifting Request',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
             elevation: 0,
           ),
           body: isLoading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primaryGreen))
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: AppColors.primaryGreen,
+                  ),
+                )
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (_controller.catalogLoadFailed &&
+                          _controller.errorMessage != null)
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.criticalRed.withValues(alpha: .08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppColors.criticalRed.withValues(
+                                alpha: .35,
+                              ),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _controller.errorMessage!,
+                                  style: const TextStyle(
+                                    color: AppColors.criticalRed,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _initData,
+                                child: const Text('Retry'),
+                              ),
+                            ],
+                          ),
+                        ),
                       // Form Header Banner
                       _buildHeaderBanner(),
 
@@ -175,16 +218,30 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                         child: ElevatedButton.icon(
                           onPressed: isSubmitting ? null : _handleSubmit,
                           icon: isSubmitting
-                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.white,
+                                  ),
+                                )
                               : const Icon(Icons.send_rounded, size: 18),
                           label: Text(
-                            isSubmitting ? 'SUBMITTING REQUEST...' : 'SUBMIT SHIFTING REQUEST',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            isSubmitting
+                                ? 'SUBMITTING REQUEST...'
+                                : 'SUBMIT SHIFTING REQUEST',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primaryGreen,
                             foregroundColor: AppColors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
                         ),
                       ),
@@ -208,7 +265,11 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
       ),
       child: const Row(
         children: [
-          Icon(Icons.alt_route_rounded, color: AppColors.primaryGreen, size: 28),
+          Icon(
+            Icons.alt_route_rounded,
+            color: AppColors.primaryGreen,
+            size: 28,
+          ),
           SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -216,7 +277,11 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
               children: [
                 Text(
                   'One-Pager Shift Request',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.deepNavy),
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepNavy,
+                  ),
                 ),
                 SizedBox(height: 2),
                 Text(
@@ -239,48 +304,32 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
         children: [
           const Row(
             children: [
-              Icon(Icons.precision_manufacturing_outlined, color: AppColors.primaryGreen, size: 18),
+              Icon(
+                Icons.precision_manufacturing_outlined,
+                color: AppColors.primaryGreen,
+                size: 18,
+              ),
               SizedBox(width: 8),
               Text('1. Machine & Vendor', style: AppTextStyles.headingSmall),
             ],
           ),
           const SizedBox(height: 12),
 
-          // Machine Dropdown
-          const Text('MACHINE *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<Machine>(
-            initialValue: _controller.availableMachines.contains(_controller.selectedMachine)
-                ? _controller.selectedMachine
-                : null,
-            hint: const Text('Select Machine'),
-            isExpanded: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              filled: true,
-              fillColor: AppColors.white,
+          // Vendor comes first: the API assignment list determines valid machines.
+          const Text(
+            'VENDOR *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
             ),
-            items: _controller.availableMachines.map((m) {
-              return DropdownMenuItem<Machine>(
-                value: m,
-                child: Text('${m.machineName} (${m.chassisNumber})', overflow: TextOverflow.ellipsis),
-              );
-            }).toList(),
-            onChanged: (val) {
-              if (val != null) {
-                _controller.selectMachine(val);
-                _aPointController.text = val.location.isNotEmpty ? val.location : 'Origin Site';
-              }
-            },
           ),
-
-          const SizedBox(height: 14),
-
-          // Vendor Dropdown
-          const Text('VENDOR *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
           const SizedBox(height: 6),
           DropdownButtonFormField<Vendor>(
-            initialValue: _controller.availableVendors.contains(_controller.selectedVendor)
+            initialValue:
+                _controller.availableVendors.contains(
+                  _controller.selectedVendor,
+                )
                 ? _controller.selectedVendor
                 : null,
             hint: const Text('Select Operating Vendor'),
@@ -300,6 +349,72 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
               if (val != null) _controller.setSelectedVendor(val);
             },
           ),
+          const SizedBox(height: 14),
+          const Text(
+            'MACHINE *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
+            ),
+          ),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<Machine>(
+            initialValue:
+                _controller.availableMachines.contains(
+                  _controller.selectedMachine,
+                )
+                ? _controller.selectedMachine
+                : null,
+            hint: const Text('Select assigned machine'),
+            isExpanded: true,
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              filled: true,
+              fillColor: AppColors.white,
+              helperText: _controller.selectedVendor == null
+                  ? 'Select a vendor to load its assigned machines.'
+                  : _controller.availableMachines.isEmpty
+                  ? 'No assigned machines could be matched to the live inventory.'
+                  : '${_controller.availableMachines.length} assigned machine(s) available',
+            ),
+            items: _controller.availableMachines
+                .map(
+                  (m) => DropdownMenuItem<Machine>(
+                    value: m,
+                    child: Text(
+                      '${m.machineName} (${m.chassisNumber})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged:
+                _controller.selectedVendor == null ||
+                    _controller.availableMachines.isEmpty
+                ? null
+                : (val) {
+                    if (val != null) {
+                      _controller.selectMachine(val);
+                      _aPointController.text = val.location.isNotEmpty
+                          ? val.location
+                          : '';
+                      _aLatController.clear();
+                      _aLngController.clear();
+                    }
+                  },
+          ),
+          if (_controller.unmatchedAssignmentCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '${_controller.unmatchedAssignmentCount} vendor assignment(s) are missing from the inventory response.',
+                style: const TextStyle(
+                  color: AppColors.criticalRed,
+                  fontSize: 12,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -313,15 +428,29 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
         children: [
           const Row(
             children: [
-              Icon(Icons.assignment_outlined, color: AppColors.primaryGreen, size: 18),
+              Icon(
+                Icons.assignment_outlined,
+                color: AppColors.primaryGreen,
+                size: 18,
+              ),
               SizedBox(width: 8),
-              Text('2. Shifting Reason & Mode', style: AppTextStyles.headingSmall),
+              Text(
+                '2. Shifting Reason & Mode',
+                style: AppTextStyles.headingSmall,
+              ),
             ],
           ),
           const SizedBox(height: 12),
 
           // Dynamic Reason Master Dropdown
-          const Text('REASON FOR SHIFTING *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
+          const Text(
+            'REASON FOR SHIFTING *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
+            ),
+          ),
           const SizedBox(height: 6),
           DropdownButtonFormField<MachineShiftReason>(
             initialValue: _controller.selectedReason,
@@ -345,7 +474,14 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
           const SizedBox(height: 14),
 
           // Mode of Shifting Toggle (OWN_HDD / BY_TRUCK)
-          const Text('MODE OF SHIFTING *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
+          const Text(
+            'MODE OF SHIFTING *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
+            ),
+          ),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -356,13 +492,18 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                     children: [
                       Icon(Icons.precision_manufacturing_rounded, size: 16),
                       SizedBox(width: 6),
-                      Text('OWN HDD', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        'OWN HDD',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ],
                   ),
                   selected: _controller.modeOfShifting == 'OWN_HDD',
                   selectedColor: AppColors.primaryGreen,
                   labelStyle: TextStyle(
-                    color: _controller.modeOfShifting == 'OWN_HDD' ? AppColors.white : AppColors.deepNavy,
+                    color: _controller.modeOfShifting == 'OWN_HDD'
+                        ? AppColors.white
+                        : AppColors.deepNavy,
                   ),
                   onSelected: (_) => _controller.setModeOfShifting('OWN_HDD'),
                 ),
@@ -375,13 +516,18 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                     children: [
                       Icon(Icons.local_shipping_rounded, size: 16),
                       SizedBox(width: 6),
-                      Text('BY TRUCK', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        'BY TRUCK',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ],
                   ),
                   selected: _controller.modeOfShifting == 'BY_TRUCK',
                   selectedColor: AppColors.primaryGreen,
                   labelStyle: TextStyle(
-                    color: _controller.modeOfShifting == 'BY_TRUCK' ? AppColors.white : AppColors.deepNavy,
+                    color: _controller.modeOfShifting == 'BY_TRUCK'
+                        ? AppColors.white
+                        : AppColors.deepNavy,
                   ),
                   onSelected: (_) => _controller.setModeOfShifting('BY_TRUCK'),
                 ),
@@ -392,14 +538,25 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
           const SizedBox(height: 14),
 
           // Required Date Field
-          const Text('REQUIRED DATE *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
+          const Text(
+            'REQUIRED DATE *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
+            ),
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: _requiredDateController,
             readOnly: true,
             onTap: _selectDate,
             decoration: const InputDecoration(
-              suffixIcon: Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.primaryGreen),
+              suffixIcon: Icon(
+                Icons.calendar_today_rounded,
+                size: 18,
+                color: AppColors.primaryGreen,
+              ),
               border: OutlineInputBorder(),
               filled: true,
               fillColor: AppColors.white,
@@ -418,14 +575,25 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
         children: [
           const Row(
             children: [
-              Icon(Icons.trip_origin_rounded, color: AppColors.movingBlue, size: 18),
+              Icon(
+                Icons.trip_origin_rounded,
+                color: AppColors.movingBlue,
+                size: 18,
+              ),
               SizedBox(width: 8),
               Text('3. Origin (Point A)', style: AppTextStyles.headingSmall),
             ],
           ),
           const SizedBox(height: 12),
 
-          const Text('POINT A NAME / SITE *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
+          const Text(
+            'POINT A NAME / SITE *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
+            ),
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: _aPointController,
@@ -445,12 +613,24 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('LATITUDE', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'LATITUDE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     TextField(
                       controller: _aLatController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
                     ),
                   ],
                 ),
@@ -460,12 +640,24 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('LONGITUDE', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'LONGITUDE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     TextField(
                       controller: _aLngController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
                     ),
                   ],
                 ),
@@ -485,14 +677,28 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
         children: [
           const Row(
             children: [
-              Icon(Icons.location_on_rounded, color: AppColors.criticalRed, size: 18),
+              Icon(
+                Icons.location_on_rounded,
+                color: AppColors.criticalRed,
+                size: 18,
+              ),
               SizedBox(width: 8),
-              Text('4. Destination (Point B)', style: AppTextStyles.headingSmall),
+              Text(
+                '4. Destination (Point B)',
+                style: AppTextStyles.headingSmall,
+              ),
             ],
           ),
           const SizedBox(height: 12),
 
-          const Text('POINT B NAME / SITE *', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.mutedTextGray)),
+          const Text(
+            'POINT B NAME / SITE *',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.mutedTextGray,
+            ),
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: _bPointController,
@@ -512,12 +718,24 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('LATITUDE', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'LATITUDE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     TextField(
                       controller: _bLatController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
                     ),
                   ],
                 ),
@@ -527,12 +745,24 @@ class _MachineTransferFlowScreenState extends State<MachineTransferFlowScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('LONGITUDE', style: TextStyle(fontSize: 10, color: AppColors.mutedTextGray, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'LONGITUDE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.mutedTextGray,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     TextField(
                       controller: _bLngController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
                     ),
                   ],
                 ),

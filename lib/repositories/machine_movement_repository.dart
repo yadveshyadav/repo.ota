@@ -22,11 +22,11 @@ abstract class MachineMovementRepository {
     required dynamic machineId,
     required dynamic reasonId,
     required String aPointName,
-    double aPointLatitude = 0.0,
-    double aPointLongitude = 0.0,
+    double? aPointLatitude,
+    double? aPointLongitude,
     required String bPointName,
-    double bPointLatitude = 0.0,
-    double bPointLongitude = 0.0,
+    double? bPointLatitude,
+    double? bPointLongitude,
     required String requiredDate,
     required String modeOfShifting,
     String? machineName,
@@ -66,8 +66,12 @@ abstract class MachineMovementRepository {
 class ApiMachineMovementRepository implements MachineMovementRepository {
   final MachineMovementApiService apiService;
 
-  ApiMachineMovementRepository({ApiClient? apiClient, MachineMovementApiService? apiService})
-      : apiService = apiService ?? MachineMovementApiService(apiClient: apiClient ?? ApiClient());
+  ApiMachineMovementRepository({
+    ApiClient? apiClient,
+    MachineMovementApiService? apiService,
+  }) : apiService =
+           apiService ??
+           MachineMovementApiService(apiClient: apiClient ?? ApiClient());
 
   @override
   Future<List<MachineShiftReason>> getReasons() async {
@@ -107,7 +111,8 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
       if (res is Map<String, dynamic>) {
         if (res['results'] is List) {
           list = res['results'] as List;
-        } else if (res['data'] is Map<String, dynamic> && res['data']['results'] is List) {
+        } else if (res['data'] is Map<String, dynamic> &&
+            res['data']['results'] is List) {
           list = res['data']['results'] as List;
         } else if (res['data'] is List) {
           list = res['data'] as List;
@@ -134,7 +139,9 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
   Future<MachineMovement?> getRequestById(dynamic id) async {
     final res = await apiService.fetchRequestDetail(id);
     if (res is Map<String, dynamic>) {
-      final data = res['data'] is Map<String, dynamic> ? res['data'] as Map<String, dynamic> : res;
+      final data = res['data'] is Map<String, dynamic>
+          ? res['data'] as Map<String, dynamic>
+          : res;
       return MachineMovement.fromJson(data);
     }
     return null;
@@ -146,11 +153,11 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
     required dynamic machineId,
     required dynamic reasonId,
     required String aPointName,
-    double aPointLatitude = 0.0,
-    double aPointLongitude = 0.0,
+    double? aPointLatitude,
+    double? aPointLongitude,
     required String bPointName,
-    double bPointLatitude = 0.0,
-    double bPointLongitude = 0.0,
+    double? bPointLatitude,
+    double? bPointLongitude,
     required String requiredDate,
     required String modeOfShifting,
     String? machineName,
@@ -167,13 +174,13 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
       'machine': mPk,
       'reason': rPk,
       'a_point_name': aPointName,
-      'a_point_latitude': aPointLatitude,
-      'a_point_longitude': aPointLongitude,
       'b_point_name': bPointName,
-      'b_point_latitude': bPointLatitude,
-      'b_point_longitude': bPointLongitude,
       'required_date': requiredDate,
       'mode_of_shifting': modeOfShifting,
+      if (aPointLatitude != null) 'a_point_latitude': aPointLatitude,
+      if (aPointLongitude != null) 'a_point_longitude': aPointLongitude,
+      if (bPointLatitude != null) 'b_point_latitude': bPointLatitude,
+      if (bPointLongitude != null) 'b_point_longitude': bPointLongitude,
     };
     if (machineChassisNo != null && machineChassisNo.trim().isNotEmpty) {
       body['machine_chassis_no'] = machineChassisNo.trim();
@@ -181,7 +188,9 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
 
     final res = await apiService.createShiftRequest(body);
     if (res is Map<String, dynamic>) {
-      final data = res['data'] is Map<String, dynamic> ? res['data'] as Map<String, dynamic> : res;
+      final data = res['data'] is Map<String, dynamic>
+          ? res['data'] as Map<String, dynamic>
+          : res;
       return MachineMovement.fromJson(data);
     }
     throw Exception('Failed to create shift request.');
@@ -191,7 +200,9 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
   Future<MachineMovement> startShifting(dynamic id) async {
     final res = await apiService.startShifting(id);
     if (res is Map<String, dynamic>) {
-      final data = res['data'] is Map<String, dynamic> ? res['data'] as Map<String, dynamic> : res;
+      final data = res['data'] is Map<String, dynamic>
+          ? res['data'] as Map<String, dynamic>
+          : res;
       return MachineMovement.fromJson(data);
     }
     throw Exception('Failed to start shifting.');
@@ -216,7 +227,9 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
 
     final res = await apiService.updateShiftingProgress(id, fields: fields);
     if (res is Map<String, dynamic>) {
-      final data = res['data'] is Map<String, dynamic> ? res['data'] as Map<String, dynamic> : res;
+      final data = res['data'] is Map<String, dynamic>
+          ? res['data'] as Map<String, dynamic>
+          : res;
       return MachineMovement.fromJson(data);
     }
     throw Exception('Failed to update shifting progress.');
@@ -248,17 +261,24 @@ class ApiMachineMovementRepository implements MachineMovementRepository {
       photoFilename: photoFilename,
     );
     if (res is Map<String, dynamic>) {
-      final data = res['data'] is Map<String, dynamic> ? res['data'] as Map<String, dynamic> : res;
+      final data = res['data'] is Map<String, dynamic>
+          ? res['data'] as Map<String, dynamic>
+          : res;
       return MachineMovement.fromJson(data);
     }
     throw Exception('Failed to mark machine as shifted.');
   }
 
   @override
-  Future<MachineMovement> cancelRequest(dynamic id, {required String remarks}) async {
+  Future<MachineMovement> cancelRequest(
+    dynamic id, {
+    required String remarks,
+  }) async {
     final res = await apiService.cancelShiftRequest(id, remarks: remarks);
     if (res is Map<String, dynamic>) {
-      final data = res['data'] is Map<String, dynamic> ? res['data'] as Map<String, dynamic> : res;
+      final data = res['data'] is Map<String, dynamic>
+          ? res['data'] as Map<String, dynamic>
+          : res;
       return MachineMovement.fromJson(data);
     }
     throw Exception('Failed to cancel shift request.');
@@ -426,16 +446,20 @@ class MockMachineMovementRepository implements MachineMovementRepository {
   }) async {
     await Future.delayed(const Duration(milliseconds: 150));
     return _requests.where((r) {
-      if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'All') {
+      if (statusFilter != null &&
+          statusFilter.isNotEmpty &&
+          statusFilter != 'All') {
         final filter = statusFilter.toUpperCase();
-        if (r.status.apiValue != filter && r.status.displayName.toUpperCase() != filter) {
+        if (r.status.apiValue != filter &&
+            r.status.displayName.toUpperCase() != filter) {
           if (filter == 'ACTIVE' && !r.status.isActive) return false;
           if (filter == 'COMPLETED' && !r.status.isCompleted) return false;
         }
       }
       if (machineFilter != null && machineFilter.isNotEmpty) {
         final q = machineFilter.toLowerCase();
-        if (!r.machineChassisNo.toLowerCase().contains(q) && !r.machineName.toLowerCase().contains(q)) {
+        if (!r.machineChassisNo.toLowerCase().contains(q) &&
+            !r.machineName.toLowerCase().contains(q)) {
           return false;
         }
       }
@@ -460,11 +484,11 @@ class MockMachineMovementRepository implements MachineMovementRepository {
     required dynamic machineId,
     required dynamic reasonId,
     required String aPointName,
-    double aPointLatitude = 0.0,
-    double aPointLongitude = 0.0,
+    double? aPointLatitude,
+    double? aPointLongitude,
     required String bPointName,
-    double bPointLatitude = 0.0,
-    double bPointLongitude = 0.0,
+    double? bPointLatitude,
+    double? bPointLongitude,
     required String requiredDate,
     required String modeOfShifting,
     String? machineName,
@@ -490,11 +514,11 @@ class MockMachineMovementRepository implements MachineMovementRepository {
       reasonId: reasonId,
       reasonName: reasonName ?? 'New Task',
       aPointName: aPointName,
-      aPointLatitude: aPointLatitude,
-      aPointLongitude: aPointLongitude,
+      aPointLatitude: aPointLatitude ?? 0.0,
+      aPointLongitude: aPointLongitude ?? 0.0,
       bPointName: bPointName,
-      bPointLatitude: bPointLatitude,
-      bPointLongitude: bPointLongitude,
+      bPointLatitude: bPointLatitude ?? 0.0,
+      bPointLongitude: bPointLongitude ?? 0.0,
       requiredDate: requiredDate,
       modeOfShifting: modeOfShifting,
       shiftingStatus: 'PENDING_SHIFTING',
@@ -517,19 +541,23 @@ class MockMachineMovementRepository implements MachineMovementRepository {
   @override
   Future<MachineMovement> startShifting(dynamic id) async {
     await Future.delayed(const Duration(milliseconds: 150));
-    final index = _requests.indexWhere((r) => r.id == id.toString() || r.requestId == id.toString());
+    final index = _requests.indexWhere(
+      (r) => r.id == id.toString() || r.requestId == id.toString(),
+    );
     if (index == -1) throw Exception('Shift request $id not found');
 
     final existing = _requests[index];
     final now = DateTime.now();
     final updatedTrail = List<MovementAuditTrailItem>.from(existing.auditTrail)
-      ..add(MovementAuditTrailItem(
-        action: 'START_SHIFTING',
-        performedByName: 'Field Shifter',
-        previousStatus: existing.status.apiValue,
-        newStatus: 'IN_PROGRESS',
-        createdAt: now,
-      ));
+      ..add(
+        MovementAuditTrailItem(
+          action: 'START_SHIFTING',
+          performedByName: 'Field Shifter',
+          previousStatus: existing.status.apiValue,
+          newStatus: 'IN_PROGRESS',
+          createdAt: now,
+        ),
+      );
 
     final updated = MachineMovement(
       id: existing.id,
@@ -571,7 +599,9 @@ class MockMachineMovementRepository implements MachineMovementRepository {
     String? remarks,
   }) async {
     await Future.delayed(const Duration(milliseconds: 150));
-    final index = _requests.indexWhere((r) => r.id == id.toString() || r.requestId == id.toString());
+    final index = _requests.indexWhere(
+      (r) => r.id == id.toString() || r.requestId == id.toString(),
+    );
     if (index == -1) throw Exception('Shift request $id not found');
 
     final existing = _requests[index];
@@ -624,19 +654,25 @@ class MockMachineMovementRepository implements MachineMovementRepository {
     String? remarks,
   }) async {
     await Future.delayed(const Duration(milliseconds: 250));
-    final index = _requests.indexWhere((r) => r.id == id.toString() || r.requestId == id.toString());
+    final index = _requests.indexWhere(
+      (r) => r.id == id.toString() || r.requestId == id.toString(),
+    );
     if (index == -1) throw Exception('Shift request $id not found');
 
     final existing = _requests[index];
     final now = DateTime.now();
     final updatedTrail = List<MovementAuditTrailItem>.from(existing.auditTrail)
-      ..add(MovementAuditTrailItem(
-        action: 'MARKED_SHIFTED',
-        performedByName: shiftingContactPerson.isNotEmpty ? shiftingContactPerson : 'Field Shifter',
-        previousStatus: existing.status.apiValue,
-        newStatus: 'SHIFTED',
-        createdAt: now,
-      ));
+      ..add(
+        MovementAuditTrailItem(
+          action: 'MARKED_SHIFTED',
+          performedByName: shiftingContactPerson.isNotEmpty
+              ? shiftingContactPerson
+              : 'Field Shifter',
+          previousStatus: existing.status.apiValue,
+          newStatus: 'SHIFTED',
+          createdAt: now,
+        ),
+      );
 
     final updated = MachineMovement(
       id: existing.id,
@@ -677,21 +713,28 @@ class MockMachineMovementRepository implements MachineMovementRepository {
   }
 
   @override
-  Future<MachineMovement> cancelRequest(dynamic id, {required String remarks}) async {
+  Future<MachineMovement> cancelRequest(
+    dynamic id, {
+    required String remarks,
+  }) async {
     await Future.delayed(const Duration(milliseconds: 150));
-    final index = _requests.indexWhere((r) => r.id == id.toString() || r.requestId == id.toString());
+    final index = _requests.indexWhere(
+      (r) => r.id == id.toString() || r.requestId == id.toString(),
+    );
     if (index == -1) throw Exception('Shift request $id not found');
 
     final existing = _requests[index];
     final now = DateTime.now();
     final updatedTrail = List<MovementAuditTrailItem>.from(existing.auditTrail)
-      ..add(MovementAuditTrailItem(
-        action: 'REQUEST_CANCELLED',
-        performedByName: 'User',
-        previousStatus: existing.status.apiValue,
-        newStatus: 'CANCELLED',
-        createdAt: now,
-      ));
+      ..add(
+        MovementAuditTrailItem(
+          action: 'REQUEST_CANCELLED',
+          performedByName: 'User',
+          previousStatus: existing.status.apiValue,
+          newStatus: 'CANCELLED',
+          createdAt: now,
+        ),
+      );
 
     final updated = MachineMovement(
       id: existing.id,
