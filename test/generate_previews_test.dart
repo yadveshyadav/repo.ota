@@ -7,8 +7,9 @@ import 'package:hero_app/app/app.dart';
 import 'package:hero_app/features/auth/presentation/screens/login_screen.dart';
 
 void main() {
-  testWidgets('Generate previews for Splash and Login screens',
-      (WidgetTester tester) async {
+  testWidgets(
+    'Generate previews for Splash and Login screens',
+    (WidgetTester tester) async {
     // Set standard high-density mobile resolution (390 x 844 at 3x pixel ratio)
     tester.view.physicalSize = const Size(1170, 2532);
     tester.view.devicePixelRatio = 3.0;
@@ -70,5 +71,9 @@ void main() {
 
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-  });
+    },
+    // This is a screenshot-generation utility, not a functional CI test.
+    // Run manually with --dart-define=GENERATE_PREVIEWS=true when needed.
+    skip: !const bool.fromEnvironment('GENERATE_PREVIEWS'),
+  );
 }
