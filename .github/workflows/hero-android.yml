@@ -50,9 +50,48 @@ jobs:
         # Existing info/warning-level lint debt is reported but does not block CI; analyzer errors remain fatal.
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Run tests
-        # Bound the time a single hanging widget test can block CI.
-        run: flutter test --reporter expanded --timeout 2m
+      - name: Test Alert
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/alert_test.dart
+      - name: Test Attendance
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/attendance_test.dart
+      - name: Test Authentication
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/auth_test.dart
+      - name: Test Authorization
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/authorization_test.dart
+      - name: Test Dashboard
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/dashboard_test.dart
+      - name: Test Expense
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/expense_test.dart
+      - name: Test Screen preview
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/generate_previews_test.dart
+      - name: Test Inventory domain
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/inventory_domain_test.dart
+      - name: Test Live status
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/live_status_test.dart
+      - name: Test Machine repository
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/machine_repository_test.dart
+      - name: Test Machine transfer
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/machine_transfer_test.dart
+      - name: Test Machines
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/machines_test.dart
+      - name: Test Muster
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/muster_test.dart
+      - name: Test OTA update
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/ota_update_test.dart
+      - name: Test Refuel
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/refuel_test.dart
+      - name: Test Reporting manager approval
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/reporting_manager_approval_test.dart
+      - name: Test Task domain
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/task_domain_test.dart
+      - name: Test Tasks
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/tasks_test.dart
+      - name: Test Team
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/team_test.dart
+      - name: Test Vendors
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/vendors_test.dart
+      - name: Test App widgets
+        run: timeout 120s flutter test --reporter expanded --timeout 90s test/widget_test.dart
 
       - name: Configure Android release signing
         if: github.event_name != 'pull_request'
