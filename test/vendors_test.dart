@@ -158,7 +158,8 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
       // Header Title & Subtitle
       expect(find.text('Vendor & Partner Management'), findsOneWidget);
