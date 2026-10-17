@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hero_app/features/machine_transfer/controller/machine_transfer_controller.dart';
 import 'package:hero_app/models/machine.dart';
 import 'package:hero_app/models/machine_response.dart';
+import 'package:hero_app/models/vendor.dart';
 import 'package:hero_app/models/vendor_response.dart';
 import 'package:hero_app/models/machine_movement.dart';
 import 'package:hero_app/repositories/machine_movement_repository.dart';
