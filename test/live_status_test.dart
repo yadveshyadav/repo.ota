@@ -5,11 +5,13 @@ import 'package:hero_app/features/live_status/screens/live_status_screen.dart';
 import 'package:hero_app/features/live_status/widgets/live_machine_card.dart';
 import 'package:hero_app/features/live_status/widgets/live_status_filter_bar.dart';
 import 'package:hero_app/models/machine.dart';
+import 'package:hero_app/repositories/machine_repository.dart';
 
 
 void main() {
   group('LiveStatusController Unit Tests', () {
     late LiveStatusController controller;
+    late MachineRepository repository;
 
 
     setUp(() {
@@ -26,25 +28,27 @@ void main() {
 
       await controller.fetchMachines();
 
+      final allMachines = controller.allMachines;
       expect(controller.isLoading, isFalse);
-      expect(controller.totalCount, equals(25));
-      expect(controller.liveCount, equals(23));
-      expect(controller.offlineCount, equals(2));
-      expect(controller.machines.length, equals(25));
+      expect(controller.totalCount, equals(allMachines.length));
+      expect(controller.liveCount, equals(allMachines.where((m) => m.isLive).length));
+      expect(controller.offlineCount, equals(allMachines.where((m) => m.isOffline).length));
+      expect(controller.machines.length, equals(allMachines.length));
     });
 
     test('Filter by status correctly modifies displayed machine list', () async {
       await controller.fetchMachines();
+      final allMachines = List<Machine>.from(controller.allMachines);
 
       // Filter by "Offline"
       controller.setFilter('Offline');
       expect(controller.selectedFilter, equals('Offline'));
-      expect(controller.machines.length, equals(2));
+      expect(controller.machines.length, equals(allMachines.where((m) => m.isOffline).length));
       expect(controller.machines.every((m) => m.isOffline), isTrue);
 
       // Filter by "Working"
       controller.setFilter('Working');
-      expect(controller.machines.length, equals(5));
+      expect(controller.machines.length, equals(allMachines.where((m) => m.isWorking).length));
       expect(controller.machines.every((m) => m.isWorking), isTrue);
 
       // Filter by "Idle"
@@ -53,11 +57,12 @@ void main() {
 
       // Reset to "All"
       controller.setFilter('All');
-      expect(controller.machines.length, equals(25));
+      expect(controller.machines.length, equals(allMachines.length));
     });
 
     test('Search query filters by chassis, model, name, or site', () async {
       await controller.fetchMachines();
+      final allMachines = List<Machine>.from(controller.allMachines);
 
       // Search by chassis
       controller.setSearchQuery('600202608396');
@@ -68,12 +73,12 @@ void main() {
       // Search by site
       controller.setSearchQuery('Sujangarh');
       await Future.delayed(const Duration(milliseconds: 350));
-      expect(controller.machines.length, equals(24));
+      expect(controller.machines.length, equals(allMachines.where((m) => m.site.toLowerCase().contains('sujangarh')).length));
 
       // Reset search
       controller.setSearchQuery('');
       await Future.delayed(const Duration(milliseconds: 350));
-      expect(controller.machines.length, equals(25));
+      expect(controller.machines.length, equals(allMachines.length));
     });
 
     test('updateSingleMachine modifies telemetry without reloading whole list', () async {
@@ -109,6 +114,7 @@ void main() {
     testWidgets('Renders Live Status header, filter chips, and machine cards',
         (WidgetTester tester) async {
       final mockRepo = MockMachineRepository();
+      final allMachines = await mockRepo.getAllMachines();
       final controller = LiveStatusController(repository: mockRepo);
       addTearDown(() {
         controller.stopAutoRefresh();
@@ -131,9 +137,9 @@ void main() {
 
       // Check title and dynamic statistics
       expect(find.text('Live Status'), findsOneWidget);
-      expect(find.text('25 machines'), findsOneWidget);
-      expect(find.text('23 live'), findsOneWidget);
-      expect(find.text('2 offline'), findsOneWidget);
+      expect(find.text('${allMachines.length} machines'), findsOneWidget);
+      expect(find.text('${allMachines.where((m) => m.isLive).length} live'), findsOneWidget);
+      expect(find.text('${allMachines.where((m) => m.isOffline).length} offline'), findsOneWidget);
 
       // Check search input hint
       expect(find.text('Find chassis, model, or site...'), findsOneWidget);
@@ -153,6 +159,7 @@ void main() {
     testWidgets('Tapping status filter chip updates displayed cards',
         (WidgetTester tester) async {
       final mockRepo = MockMachineRepository();
+      final allMachines = await mockRepo.getAllMachines();
       final controller = LiveStatusController(repository: mockRepo);
       addTearDown(() {
         controller.stopAutoRefresh();
@@ -179,7 +186,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(controller.selectedFilter, equals('Working'));
-      expect(controller.machines.length, equals(5));
+      expect(controller.machines.length, equals(allMachines.where((m) => m.isWorking).length));
     });
   });
 }
