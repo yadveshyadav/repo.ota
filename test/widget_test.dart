@@ -9,8 +9,9 @@ import 'package:hero_app/features/auth/services/auth_storage_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await AuthStorageService().init(force: true);
   });
   testWidgets('1. Splash screen renders HERO branding and tagline',
       (WidgetTester tester) async {
@@ -31,7 +32,8 @@ void main() {
 
   testWidgets('2. Splash screen navigates to Login screen after animation',
       (WidgetTester tester) async {
-    await AuthStorageService().clearSession();
+    // Preferences are reset in setUp. Avoid clearSession() here because it also
+    // calls attendance-storage plugins that are not registered in widget tests.
     await tester.pumpWidget(const HeroApp());
 
     expect(find.byType(SplashScreen), findsOneWidget);
@@ -119,7 +121,7 @@ void main() {
     // Tap Sign In button without filling fields
     await tester.tap(signInButtonFinder);
     await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump();
+    await tester.pump();
 
     // Verify validation error messages are displayed
     expect(find.text(AppConstants.emailRequired), findsOneWidget);
@@ -139,7 +141,7 @@ void main() {
     );
 
     await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump();
+    await tester.pump();
 
     // Verify no RenderFlex overflow occurs on small screen dimensions
     expect(tester.takeException(), isNull);
