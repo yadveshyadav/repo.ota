@@ -15,10 +15,12 @@ import 'login_screen.dart';
 /// Ultra-smooth Industrial Splash Screen with persistent display timing & entrance animations
 class SplashScreen extends StatefulWidget {
   final AuthRepository? repository;
+  final bool checkForUpdatesOnLaunch;
 
   const SplashScreen({
     super.key,
     this.repository,
+    this.checkForUpdatesOnLaunch = true,
   });
 
   @override
@@ -147,7 +149,9 @@ class _SplashScreenState extends State<SplashScreen>
     if (routeName == AppRoutes.dashboard) {
       targetScreen = const DashboardScreen();
     } else {
-      targetScreen = const LoginScreen();
+      targetScreen = LoginScreen(
+        checkForUpdatesOnLaunch: widget.checkForUpdatesOnLaunch,
+      );
     }
 
     Navigator.of(context).pushReplacement(
