@@ -15,7 +15,8 @@ void main() {
       ),
     );
 
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
 
     // Verify Title
     expect(find.text('Machines'), findsOneWidget);
@@ -43,7 +44,8 @@ void main() {
       ),
     );
 
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump();
 
     // Verify Title
     expect(find.text('Machines'), findsOneWidget);
