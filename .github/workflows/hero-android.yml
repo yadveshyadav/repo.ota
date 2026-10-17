@@ -1,0 +1,129 @@
+name: Hero Android CI and Release
+
+on:
+  push:
+    branches:
+      - Ota.hero
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - Ota.hero
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hero-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: Analyze, Test and Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.8"
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze Flutter code
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test --reporter expanded
+
+      - name: Configure Android release signing
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "Missing secret: ANDROID_KEYSTORE_BASE64"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Missing secret: KEYSTORE_PASSWORD"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Missing secret: KEY_ALIAS"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Missing secret: KEY_PASSWORD"; exit 1; }
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hero-release.keystore"
+          {
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'storeFile=%s\n' "$RUNNER_TEMP/hero-release.keystore"
+          } > android/key.properties
+
+          chmod 600 "$RUNNER_TEMP/hero-release.keystore" android/key.properties
+
+      - name: Build production APK
+        if: github.event_name != 'pull_request'
+        run: flutter build apk --release --flavor prod
+
+      - name: Prepare APK and checksum
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK="build/app/outputs/flutter-apk/app-prod-release.apk"
+          test -f "$APK" || { echo "Expected APK not found: $APK"; find build/app/outputs -maxdepth 3 -type f -print; exit 1; }
+          cp "$APK" dist/hero-android-release.apk
+          cd dist
+          sha256sum hero-android-release.apk > hero-android-release.apk.sha256
+
+      - name: Upload APK artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hero-android-apk
+          path: |
+            dist/hero-android-release.apk
+            dist/hero-android-release.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: build-android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built APK
+        uses: actions/download-artifact@v4
+        with:
+          name: hero-android-apk
+          path: dist
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/hero-android-release.apk \
+            dist/hero-android-release.apk.sha256 \
+            --title "Hero $GITHUB_REF_NAME" \
+            --generate-notes
