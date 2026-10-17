@@ -51,6 +51,7 @@ class OtaUpdateService {
 
   /// Fetches remote metadata (version.json / update.json) and parses strongly typed OtaUpdateInfo
   Future<OtaUpdateInfo> fetchRemoteUpdateInfo() async {
+    Object? lastFetchError;
     try {
       final response = await _client.get(Uri.parse(metadataUrl)).timeout(
         const Duration(seconds: 12),
@@ -64,6 +65,7 @@ class OtaUpdateService {
         }
       }
     } catch (e) {
+      lastFetchError = e;
       if (kDebugMode) {
         print('[OtaUpdateService] Primary fetch metadata error ($metadataUrl): $e');
       }
@@ -83,12 +85,16 @@ class OtaUpdateService {
           }
         }
       } catch (e) {
+        lastFetchError = e;
         if (kDebugMode) {
           print('[OtaUpdateService] Fallback fetch metadata error ($fallbackMetadataUrl): $e');
         }
       }
     }
 
+    if (lastFetchError != null) {
+      throw lastFetchError!;
+    }
     throw Exception('Unable to check for updates from server.');
   }
 
