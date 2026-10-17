@@ -17,8 +17,14 @@ import '../widgets/primary_button.dart';
 class LoginScreen extends StatefulWidget {
   final AuthRepository? repository;
   final AuthController? controller;
+  final bool checkForUpdatesOnLaunch;
 
-  const LoginScreen({super.key, this.repository, this.controller});
+  const LoginScreen({
+    super.key,
+    this.repository,
+    this.controller,
+    this.checkForUpdatesOnLaunch = true,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -47,11 +53,13 @@ class _LoginScreenState extends State<LoginScreen> {
     _authController.addListener(_onAuthStateChanged);
     _loadInstalledVersion();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        OtaUpdateDialogs.performAppUpdateCheck(context, isManualCheck: false);
-      }
-    });
+    if (widget.checkForUpdatesOnLaunch) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          OtaUpdateDialogs.performAppUpdateCheck(context, isManualCheck: false);
+        }
+      });
+    }
   }
 
   Future<void> _loadInstalledVersion() async {
