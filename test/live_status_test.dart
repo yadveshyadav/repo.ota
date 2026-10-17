@@ -114,7 +114,6 @@ void main() {
     testWidgets('Renders Live Status header, filter chips, and machine cards',
         (WidgetTester tester) async {
       final mockRepo = MockMachineRepository();
-      final allMachines = await mockRepo.getAllMachines();
       final controller = LiveStatusController(
         repository: mockRepo,
         refreshInterval: const Duration(days: 1),
@@ -136,7 +135,9 @@ void main() {
       // Initial loading state shows skeletons or header
       expect(find.text('Live Status'), findsOneWidget);
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      final allMachines = controller.allMachines;
 
       // Check title and dynamic statistics
       expect(find.text('Live Status'), findsOneWidget);
@@ -162,7 +163,6 @@ void main() {
     testWidgets('Tapping status filter chip updates displayed cards',
         (WidgetTester tester) async {
       final mockRepo = MockMachineRepository();
-      final allMachines = await mockRepo.getAllMachines();
       final controller = LiveStatusController(
         repository: mockRepo,
         refreshInterval: const Duration(days: 1),
@@ -181,7 +181,9 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      final allMachines = controller.allMachines;
 
       // Tap 'Working' filter chip inside LiveStatusFilterBar
       final workingChip = find.descendant(
@@ -189,7 +191,7 @@ void main() {
         matching: find.text('Working'),
       );
       await tester.tap(workingChip);
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       expect(controller.selectedFilter, equals('Working'));
       expect(controller.machines.length, equals(allMachines.where((m) => m.isWorking).length));
