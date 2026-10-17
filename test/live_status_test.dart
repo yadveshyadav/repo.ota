@@ -115,7 +115,10 @@ void main() {
         (WidgetTester tester) async {
       final mockRepo = MockMachineRepository();
       final allMachines = await mockRepo.getAllMachines();
-      final controller = LiveStatusController(repository: mockRepo);
+      final controller = LiveStatusController(
+        repository: mockRepo,
+        refreshInterval: const Duration(days: 1),
+      );
       addTearDown(() {
         controller.stopAutoRefresh();
         controller.dispose();
@@ -160,7 +163,10 @@ void main() {
         (WidgetTester tester) async {
       final mockRepo = MockMachineRepository();
       final allMachines = await mockRepo.getAllMachines();
-      final controller = LiveStatusController(repository: mockRepo);
+      final controller = LiveStatusController(
+        repository: mockRepo,
+        refreshInterval: const Duration(days: 1),
+      );
       addTearDown(() {
         controller.stopAutoRefresh();
         controller.dispose();
