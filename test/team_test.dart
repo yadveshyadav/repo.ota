@@ -243,7 +243,8 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
       expect(find.text('Team & Staff Management'), findsOneWidget);
       expect(find.text('Total Staff'), findsOneWidget);
@@ -272,7 +273,8 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
       expect(find.text('Team Member Profile'), findsOneWidget);
       expect(find.text('Kulwinder Singh'), findsOneWidget);
