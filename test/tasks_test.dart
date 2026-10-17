@@ -309,7 +309,8 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
       expect(find.text('My Tasks'), findsOneWidget);
       expect(find.text('Task Management'), findsOneWidget);
@@ -354,7 +355,8 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
 
       expect(find.text('TASK-2026-54397'), findsWidgets);
       expect(find.text('Block Route Hierarchy'), findsOneWidget);
